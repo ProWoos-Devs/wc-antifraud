@@ -206,7 +206,7 @@ class WCAF_GitHub_Updater {
 		$package = $release['zipball_url'] ?? '';
 		if ( ! empty( $release['assets'] ) ) {
 			foreach ( $release['assets'] as $asset ) {
-				if ( str_ends_with( $asset['name'], '.zip' ) ) {
+				if ( '.zip' === substr( $asset['name'], -4 ) ) {
 					$package = $asset['browser_download_url'];
 					break;
 				}
