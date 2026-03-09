@@ -97,6 +97,12 @@ class WCAF_Settings {
 			echo '<p>' . esc_html__( 'Advanced detection that may produce false positives. Test on staging first.', 'wc-antifraud' ) . '</p>';
 		}, 'wc-antifraud' );
 		add_settings_field( 'enable_proxy_check', __( 'VPN/Proxy detection', 'wc-antifraud' ), [ __CLASS__, 'field_proxy' ], 'wc-antifraud', 'wcaf_heuristics' );
+
+		// REST API section
+		add_settings_section( 'wcaf_rest', __( 'REST API Protection', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'Block bots from creating orders via the WooCommerce REST/Store API without a valid checkout session.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud' );
+		add_settings_field( 'enable_rest_hardening', __( 'REST API hardening', 'wc-antifraud' ), [ __CLASS__, 'field_rest_hardening' ], 'wc-antifraud', 'wcaf_rest' );
 	}
 
 	private static function register_blacklist_fields() {
@@ -127,8 +133,9 @@ class WCAF_Settings {
 
 		if ( 'detection' === $tab ) {
 			$output['enable_unknown_origin'] = ! empty( $input['enable_unknown_origin'] ) ? 1 : 0;
-			$output['enable_proxy_check']    = ! empty( $input['enable_proxy_check'] ) ? 1 : 0;
-			$output['enable_ip_repeat']      = ! empty( $input['enable_ip_repeat'] ) ? 1 : 0;
+			$output['enable_proxy_check']     = ! empty( $input['enable_proxy_check'] ) ? 1 : 0;
+			$output['enable_ip_repeat']       = ! empty( $input['enable_ip_repeat'] ) ? 1 : 0;
+			$output['enable_rest_hardening']  = ! empty( $input['enable_rest_hardening'] ) ? 1 : 0;
 			if ( isset( $input['target_amount'] ) )    { $output['target_amount']    = floatval( $input['target_amount'] ); }
 			if ( isset( $input['amount_tolerance'] ) )  { $output['amount_tolerance']  = floatval( $input['amount_tolerance'] ); }
 			if ( isset( $input['ip_repeat_threshold'] ) ) { $output['ip_repeat_threshold'] = absint( $input['ip_repeat_threshold'] ); }
@@ -388,6 +395,15 @@ class WCAF_Settings {
 			esc_attr( self::key() ), checked( 1, $o['enable_proxy_check'], false ),
 			esc_html__( 'Enable VPN/Proxy heuristic detection', 'wc-antifraud' ),
 			esc_html__( 'May produce false positives behind CDNs.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_rest_hardening() {
+		$o = self::opt();
+		printf( '<label><input name="%s[enable_rest_hardening]" type="checkbox" value="1" %s /> %s</label><p class="description">%s</p>',
+			esc_attr( self::key() ), checked( 1, $o['enable_rest_hardening'], false ),
+			esc_html__( 'Block unauthenticated order creation via REST API', 'wc-antifraud' ),
+			esc_html__( 'Prevents bots from POSTing directly to WooCommerce order endpoints. Only allows requests with valid checkout session nonces, API keys, or admin authentication. Recommended: always on.', 'wc-antifraud' )
 		);
 	}
 

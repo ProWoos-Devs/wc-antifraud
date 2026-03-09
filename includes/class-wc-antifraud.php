@@ -135,6 +135,7 @@ class WC_Antifraud {
 			'enable_ip_repeat'      => 0,
 			'ip_repeat_threshold'   => 3,
 			'ip_repeat_window'      => 3600,
+			'enable_rest_hardening' => 1,
 			'blocked_emails'        => '',
 			'blocked_ips'           => '',
 			'blocked_phones'        => '',

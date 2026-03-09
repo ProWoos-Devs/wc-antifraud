@@ -18,6 +18,10 @@ class WCAF_Fraud_Checks {
 		add_action( 'woocommerce_check_cart_items', [ $this, 'check_cart_total' ] );
 		add_action( 'woocommerce_after_checkout_validation', [ $this, 'check_checkout' ], 20, 2 );
 		add_action( 'woocommerce_thankyou', [ $this, 'analyze_order_after_payment' ], 10, 1 );
+
+		// Catch failed/cancelled orders too (bot card-testing orders always fail)
+		add_action( 'woocommerce_order_status_failed', [ $this, 'analyze_failed_order' ], 10, 1 );
+		add_action( 'woocommerce_order_status_cancelled', [ $this, 'analyze_failed_order' ], 10, 1 );
 	}
 
 	/**
@@ -80,6 +84,27 @@ class WCAF_Fraud_Checks {
 	public function analyze_order_after_payment( $order_id ) {
 		$order = wc_get_order( $order_id );
 		if ( ! $order ) {
+			return;
+		}
+		$reasons = $this->detect_fraud_indicators( $order );
+		if ( ! empty( $reasons ) ) {
+			WCAF_Order_Status::mark_as_fraud( $order, $reasons );
+			WCAF_Email_Alerts::send_alert( $order, $reasons, $this->options );
+			do_action( 'wcaf_suspicious_order_detected', $order, $reasons );
+		}
+	}
+
+	/**
+	 * Analyze failed/cancelled orders for fraud indicators
+	 *
+	 * @param int $order_id
+	 */
+	public function analyze_failed_order( $order_id ) {
+		$order = wc_get_order( $order_id );
+		if ( ! $order ) {
+			return;
+		}
+		if ( 'fraud-auto-cancelled' === $order->get_status() ) {
 			return;
 		}
 		$reasons = $this->detect_fraud_indicators( $order );

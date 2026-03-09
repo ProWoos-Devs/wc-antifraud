@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-03-09
+
+### Fixed
+- Re-enable strict nonce verification in REST API hardening (bots were sending fake nonces)
+- Catch failed/cancelled orders for fraud analysis (bot card-testing orders always fail at payment)
+
+### Added
+- REST API hardening toggle in Detection Rules settings tab
+
 ## [1.0.3] - 2026-03-09
 
 ### Fixed
