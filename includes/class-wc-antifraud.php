@@ -55,6 +55,7 @@ class WC_Antifraud {
 		require_once $dir . 'class-wcaf-fraud-checks.php';
 		require_once $dir . 'class-wcaf-rest-hardening.php';
 		require_once $dir . 'class-wcaf-settings.php';
+		require_once $dir . 'class-wcaf-github-updater.php';
 	}
 
 	/**
@@ -76,6 +77,7 @@ class WC_Antifraud {
 
 		if ( is_admin() ) {
 			WCAF_Settings::init();
+			new WCAF_GitHub_Updater();
 		}
 	}
 
