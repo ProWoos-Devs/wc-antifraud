@@ -33,7 +33,7 @@ class WCAF_Email_Alerts {
 		$body[] = '';
 		$body[] = __( 'ORDER DETAILS:', 'wc-antifraud' );
 		$body[] = sprintf( 'Order #: %d', $order->get_id() );
-		$body[] = sprintf( 'Total: %s', $order->get_formatted_order_total() );
+		$body[] = sprintf( 'Total: %s', wp_strip_all_tags( $order->get_formatted_order_total() ) );
 		$body[] = sprintf( 'Status: %s', wc_get_order_status_name( $order->get_status() ) );
 		$body[] = sprintf( 'Date: %s', $order->get_date_created()->date_i18n( wc_date_format() . ' ' . wc_time_format() ) );
 		$body[] = '';

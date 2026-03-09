@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-03-09
+
+### Fixed
+- Fix fraud order count showing 0 — custom post status was not being registered (nested `init` hook)
+- Fix raw HTML in fraud alert emails — `get_formatted_order_total()` output now stripped to plain text
+
+### Added
+- "Fraud" filter link in WooCommerce orders list (works with both CPT and HPOS)
+
 ## [1.0.4] - 2026-03-09
 
 ### Fixed

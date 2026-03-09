@@ -265,7 +265,7 @@ class WCAF_Settings {
 		global $wpdb;
 		$date_sql = $wpdb->prepare( '%s', $date_after . ' 00:00:00' );
 
-		$fraud_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status='wc-fraud-auto-cancelled' AND post_date >= {$date_sql}" );
+		$fraud_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status='fraud-auto-cancelled' AND post_date >= {$date_sql}" );
 		$legit_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-processing','wc-completed','wc-on-hold') AND post_date >= {$date_sql}" );
 		$failed_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-failed','wc-cancelled') AND post_date >= {$date_sql}" );
 		$total_count  = $fraud_count + $legit_count + $failed_count;
