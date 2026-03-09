@@ -46,16 +46,9 @@ class WCAF_Fraud_Checks {
 			__( 'We cannot process your order due to security concerns. Please contact us if you believe this is a mistake.', 'wc-antifraud' )
 		);
 
-		// Unknown origin
-		if ( ! empty( $this->options['enable_unknown_origin'] ) ) {
-			// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-			$cookie = isset( $_COOKIE['wc_order_attribution_source_type'] ) ? sanitize_text_field( wp_unslash( $_COOKIE['wc_order_attribution_source_type'] ) ) : '';
-			$session = WC()->session ? WC()->session->get( 'wc_order_attribution_source_type' ) : '';
-			if ( empty( $cookie ) && empty( $session ) ) {
-				$errors->add( 'wcaf_unknown_origin', $block_msg );
-				return;
-			}
-		}
+		// Note: Unknown origin is checked post-payment only (in analyze_order_after_payment).
+		// Blocking at checkout caused false positives for customers with cookie blockers,
+		// Safari ITP, or when WC attribution JS didn't load.
 
 		$email = isset( $data['billing_email'] ) ? $data['billing_email'] : '';
 		$phone = isset( $data['billing_phone'] ) ? $data['billing_phone'] : '';

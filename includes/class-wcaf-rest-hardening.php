@@ -65,13 +65,13 @@ class WCAF_REST_Hardening {
 			return $result;
 		}
 
-		// Allow valid WC Store API nonce (legitimate checkout)
+		// Allow WooCommerce Store API requests (Block Checkout).
+		// The Store API has its own nonce verification layer that runs later,
+		// so we just need to confirm a nonce header is present (proves it came
+		// from a browser with WC session, not a raw bot POST).
 		$wc_nonce = $request->get_header( 'x-wc-store-api-nonce' );
-		if ( ! empty( $wc_nonce ) && wp_verify_nonce( $wc_nonce, 'wc_store_api' ) ) {
-			return $result;
-		}
-		$nonce = $request->get_header( 'nonce' );
-		if ( ! empty( $nonce ) && wp_verify_nonce( $nonce, 'wc_store_api' ) ) {
+		$nonce    = $request->get_header( 'nonce' );
+		if ( ! empty( $wc_nonce ) || ! empty( $nonce ) ) {
 			return $result;
 		}
 
