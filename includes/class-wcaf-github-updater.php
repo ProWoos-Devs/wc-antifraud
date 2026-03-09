@@ -16,6 +16,7 @@ class WCAF_GitHub_Updater {
 
 	const SLUG         = 'wc-antifraud';
 	const REPO         = 'ProWoos-Devs/wc-antifraud';
+	const ASSETS_URL   = 'https://raw.githubusercontent.com/ProWoos-Devs/wc-antifraud/main/assets';
 	const CACHE_KEY    = 'wcaf_update_data';
 	const CACHE_EXPIRY = 43200; // 12 hours
 
@@ -58,6 +59,11 @@ class WCAF_GitHub_Updater {
 
 		$current_version = $transient->checked[ $this->plugin_basename ] ?? WCAF_VERSION;
 
+		$icons = [
+			'1x' => self::ASSETS_URL . '/icon-128x128.png',
+			'2x' => self::ASSETS_URL . '/icon-256x256.png',
+		];
+
 		if ( version_compare( $remote['version'], $current_version, '>' ) ) {
 			$transient->response[ $this->plugin_basename ] = (object) [
 				'slug'         => self::SLUG,
@@ -68,6 +74,7 @@ class WCAF_GitHub_Updater {
 				'tested'       => $remote['tested'] ?? '',
 				'requires_php' => $remote['requires_php'] ?? '7.4',
 				'requires'     => $remote['requires'] ?? '5.8',
+				'icons'        => $icons,
 			];
 		} else {
 			// Tell WP we checked and it's up to date (prevents WP.org lookup).
@@ -76,6 +83,7 @@ class WCAF_GitHub_Updater {
 				'plugin'      => $this->plugin_basename,
 				'new_version' => $current_version,
 				'url'         => 'https://github.com/' . self::REPO,
+				'icons'       => $icons,
 			];
 		}
 
@@ -127,6 +135,14 @@ class WCAF_GitHub_Updater {
 			'requires_php'  => $remote['requires_php'] ?? '7.4',
 			'last_updated'  => $remote['updated'] ?? '',
 			'download_link' => $remote['package'] ?? '',
+			'banners'       => [
+				'low'  => self::ASSETS_URL . '/banner-772x250.png',
+				'high' => self::ASSETS_URL . '/banner-1544x500.png',
+			],
+			'icons'         => [
+				'1x' => self::ASSETS_URL . '/icon-128x128.png',
+				'2x' => self::ASSETS_URL . '/icon-256x256.png',
+			],
 			'sections'      => [
 				'description' => 'Multi-layer anti-fraud protection for WooCommerce: origin verification, blacklists, suspicious amount detection, rate limiting, REST API hardening, and automated fraud management.',
 				'changelog'   => $changelog,

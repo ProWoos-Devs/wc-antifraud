@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-03-09
+
+### Added
+- Plugin banner (772x250 + retina) and icon (128x128 + retina) for wp-admin update screen
+- Banner/icon URLs served via GitHub updater `plugin_info()` and update transient
+
+### Changed
+- GitHub updater now includes `banners` and `icons` in plugin API responses
+
+## [1.0.1] - 2026-03-09
+
+### Fixed
+- Remove pre-payment unknown origin check from checkout validation (caused false positives with cookie blockers, Safari ITP)
+- Relax REST API nonce verification for Block Checkout Store API (WC does its own verification)
+
+### Added
+- Declare HPOS (`custom_order_tables`) and Block Checkout (`cart_checkout_blocks`) compatibility via `FeaturesUtil`
+
 ## [1.0.0] - 2026-03-09
 
 ### Added
