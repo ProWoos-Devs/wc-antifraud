@@ -125,10 +125,12 @@ class WCAF_Fraud_Checks {
 		$reasons = [];
 		$opts    = $this->options;
 
-		// Unknown origin
-		$origin = $order->get_meta( '_wc_order_attribution_source_type' );
-		if ( empty( $origin ) || 'unknown' === strtolower( $origin ) ) {
-			$reasons[] = __( 'Unknown Origin', 'wc-antifraud' );
+		// Store API bot detection
+		// Orders created via store-api with no WC attribution data are bots
+		// posting directly to the API, bypassing the actual checkout page.
+		$created_via = $order->get_created_via();
+		if ( 'store-api' === $created_via && empty( $order->get_meta( '_wc_order_attribution_source_type' ) ) ) {
+			$reasons[] = __( 'Store API Bot Order (no checkout session)', 'wc-antifraud' );
 		}
 
 		// Suspicious amount

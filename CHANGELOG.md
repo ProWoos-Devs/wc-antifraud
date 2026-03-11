@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-11
+
+### Changed
+- Replace unreliable "Unknown Origin" check with precise Store API bot detection
+- Detect orders with `_created_via=store-api` and no WC attribution data
+- Always-on check (no toggle) — eliminates false positives for legit customers
+
+### Removed
+- `enable_unknown_origin` setting dependency — no longer needed
+
 ## [1.0.5] - 2026-03-09
 
 ### Fixed
