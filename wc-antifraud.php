@@ -3,7 +3,7 @@
  * Plugin Name: WC Antifraud
  * Plugin URI:  https://github.com/ProWoos-Devs/wc-antifraud
  * Description: Multi-layer anti-fraud protection for WooCommerce: origin verification, blacklists (email, IP, phone), suspicious amount detection, rate limiting, REST API hardening, and automated fraud management with email alerts.
- * Version:     1.1.0
+ * Version:     1.1.1
  * Author:      ProWoos
  * Author URI:  https://github.com/ProWoos-Devs
  * Text Domain: wc-antifraud
@@ -35,7 +35,7 @@ if ( version_compare( PHP_VERSION, '7.4', '<' ) ) {
 	return;
 }
 
-define( 'WCAF_VERSION', '1.0.5' );
+define( 'WCAF_VERSION', '1.1.1' );
 define( 'WCAF_PLUGIN_FILE', __FILE__ );
 define( 'WCAF_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WCAF_PLUGIN_BASENAME', plugin_basename( __FILE__ ) );

@@ -208,13 +208,16 @@ class WCAF_Settings {
 	// ── Activity Log ──────────────────────────────────────────────────
 
 	private static function render_activity_log() {
-		$orders = wc_get_orders( [
-			'status'  => [ 'fraud-auto-cancelled' ],
-			'type'    => 'shop_order',
-			'limit'   => 50,
-			'orderby' => 'date',
-			'order'   => 'DESC',
-		] );
+		// Use direct SQL to avoid WC object cache returning stale/wrong status orders.
+		global $wpdb;
+		$order_ids = $wpdb->get_col(
+			"SELECT ID FROM {$wpdb->posts}
+			 WHERE post_type = 'shop_order'
+			 AND post_status = 'fraud-auto-cancelled'
+			 ORDER BY post_date DESC
+			 LIMIT 50"
+		);
+		$orders = array_filter( array_map( 'wc_get_order', $order_ids ) );
 		?>
 		<div class="wcaf-card">
 			<h3><?php esc_html_e( 'Recent Fraud Detections', 'wc-antifraud' ); ?></h3>
@@ -270,7 +273,17 @@ class WCAF_Settings {
 		$failed_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-failed','wc-cancelled') AND post_date >= {$date_sql}" );
 		$total_count  = $fraud_count + $legit_count + $failed_count;
 
-		$fraud_orders  = wc_get_orders( [ 'status' => [ 'fraud-auto-cancelled' ], 'type' => 'shop_order', 'limit' => 100, 'date_after' => $date_after, 'orderby' => 'date', 'order' => 'DESC' ] );
+		// Get fraud order details via direct SQL (avoids WC object cache returning wrong orders)
+		$fraud_order_ids = $wpdb->get_col( $wpdb->prepare(
+			"SELECT ID FROM {$wpdb->posts}
+			 WHERE post_type = 'shop_order'
+			 AND post_status = 'fraud-auto-cancelled'
+			 AND post_date >= %s
+			 ORDER BY post_date DESC
+			 LIMIT 100",
+			$date_after . ' 00:00:00'
+		) );
+		$fraud_orders = array_filter( array_map( 'wc_get_order', $fraud_order_ids ) );
 		$reason_counts = $fraud_emails = $fraud_ips = [];
 		foreach ( $fraud_orders as $order ) {
 			$e = $order->get_billing_email();

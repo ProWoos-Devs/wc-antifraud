@@ -107,6 +107,12 @@ class WCAF_Fraud_Checks {
 		if ( 'fraud-auto-cancelled' === $order->get_status() ) {
 			return;
 		}
+		// Only analyze failed orders from Store API (bots).
+		// Legit customers who go through classic checkout and get a payment
+		// decline are not fraud — even if they retry and trigger IP repeat.
+		if ( 'store-api' !== $order->get_created_via() ) {
+			return;
+		}
 		$reasons = $this->detect_fraud_indicators( $order );
 		if ( ! empty( $reasons ) ) {
 			WCAF_Order_Status::mark_as_fraud( $order, $reasons );
