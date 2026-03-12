@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-03-12
+
+### Fixed
+- Fix HTML entities in fraud alert emails — `&#36;` now renders as `$` in order total
+- Add direct admin link to Order # line in fraud alert emails for quick access
+
 ## [1.1.0] - 2026-03-11
 
 ### Changed

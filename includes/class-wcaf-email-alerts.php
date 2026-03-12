@@ -32,8 +32,8 @@ class WCAF_Email_Alerts {
 		$body[] = __( 'A suspicious order has been detected and automatically flagged.', 'wc-antifraud' );
 		$body[] = '';
 		$body[] = __( 'ORDER DETAILS:', 'wc-antifraud' );
-		$body[] = sprintf( 'Order #: %d', $order->get_id() );
-		$body[] = sprintf( 'Total: %s', wp_strip_all_tags( $order->get_formatted_order_total() ) );
+		$body[] = sprintf( 'Order #: %d — %s', $order->get_id(), admin_url( 'post.php?post=' . $order->get_id() . '&action=edit' ) );
+		$body[] = sprintf( 'Total: %s', html_entity_decode( wp_strip_all_tags( $order->get_formatted_order_total() ), ENT_QUOTES, 'UTF-8' ) );
 		$body[] = sprintf( 'Status: %s', wc_get_order_status_name( $order->get_status() ) );
 		$body[] = sprintf( 'Date: %s', $order->get_date_created()->date_i18n( wc_date_format() . ' ' . wc_time_format() ) );
 		$body[] = '';
