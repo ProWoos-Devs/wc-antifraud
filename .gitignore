@@ -1,3 +1,5 @@
 CLAUDE.md
-dev-tools/
+# Ignore local dev-tools cruft but keep the release shell scripts in the repo.
+dev-tools/*
+!dev-tools/*.sh
 PHPCS-REPORT.txt
