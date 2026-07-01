@@ -8,7 +8,7 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, blacklists (email, IP, phone), suspicious amount detection, rate limiting, REST API hardening, and automated fraud management with email alerts.
 
-> **Current Version: 1.2.0** | **Released: March 9, 2026**
+> **Current Version: 1.2.0** | **Released: July 1, 2026**
 
 ## Features
 
