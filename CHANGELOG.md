@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-01
+
+### Added
+- Optional "Flag all unknown-origin orders as fraud" rule (`enable_unknown_origin`): extends empty-attribution detection to classic-checkout orders, not just the Store API. Scoped to customer-facing paths only — admin/manual, subscription, and API-integration orders are never flagged.
+- "Change status to Fraud" bulk action on the Orders list (classic + HPOS).
+- Persistent fraud flag (`_wcaf_is_fraud`) and a "Fraud" badge column, so an order still shows as fraud after a refund relabels it to Refunded.
+
+### Changed
+- Re-wire the previously inert `enable_unknown_origin` setting to control the classic-checkout unknown-origin rule.
+- Server-side post-payment detection: also hook `woocommerce_payment_complete` and the `processing`/`completed`/`on-hold` status transitions, so working-stolen-card orders that never render the thank-you page are still screened. `analyze_order_after_payment()` is now idempotent.
+- Failed/cancelled analysis is created_via-aware: Store API orders get the full check set; classic-checkout orders are judged only on the unknown-origin signal (never amount/IP-repeat), so a genuine decline+retry can't be false-flagged.
+
 ## [1.1.2] - 2026-03-12
 
 ### Fixed

@@ -356,8 +356,8 @@ class WCAF_Settings {
 		$o = self::opt();
 		printf( '<label><input name="%s[enable_unknown_origin]" type="checkbox" value="1" %s /> %s</label><p class="description">%s</p>',
 			esc_attr( self::key() ), checked( 1, $o['enable_unknown_origin'], false ),
-			esc_html__( 'Block orders without proper attribution data', 'wc-antifraud' ),
-			esc_html__( 'Orders placed by bots lack browser session/attribution cookies. This is the primary defense.', 'wc-antifraud' )
+			esc_html__( 'Flag all unknown-origin orders as fraud (classic checkout included)', 'wc-antifraud' ),
+			esc_html__( 'Marks any order with no WooCommerce attribution data as fraud, whether placed through the classic checkout or the Store API. Store API bot orders are always caught regardless of this setting; enabling this extends the same rule to classic-checkout orders. Only customer-facing paths are affected — admin/manual, subscription, and API-integration orders are never flagged. Recommended: on.', 'wc-antifraud' )
 		);
 	}
 
