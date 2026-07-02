@@ -147,6 +147,12 @@ class WCAF_Order_Status {
 		// update_status() calls save(), which persists this pending meta.
 		$order->update_meta_data( self::FRAUD_FLAG_META, 'yes' );
 		$order->update_status( self::STATUS_SLUG, $note );
+
+		// Report the attacking IP to AbuseIPDB (no-op unless enabled and an
+		// API key is configured). Runs here so both automatic detections and
+		// the manual bulk action feed the community database.
+		WCAF_AbuseIPDB::report_order( $order, $reasons );
+
 		return true;
 	}
 

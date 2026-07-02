@@ -51,6 +51,7 @@ class WC_Antifraud {
 		require_once $dir . 'class-wcaf-helpers.php';
 		require_once $dir . 'class-wcaf-ip-tracker.php';
 		require_once $dir . 'class-wcaf-email-alerts.php';
+		require_once $dir . 'class-wcaf-abuseipdb.php';
 		require_once $dir . 'class-wcaf-order-status.php';
 		require_once $dir . 'class-wcaf-fraud-checks.php';
 		require_once $dir . 'class-wcaf-rest-hardening.php';
@@ -136,6 +137,8 @@ class WC_Antifraud {
 			'ip_repeat_threshold'   => 3,
 			'ip_repeat_window'      => 3600,
 			'enable_rest_hardening' => 1,
+			'enable_abuseipdb'      => 0,
+			'abuseipdb_api_key'     => '',
 			'blocked_emails'        => '',
 			'blocked_ips'           => '',
 			'blocked_phones'        => '',

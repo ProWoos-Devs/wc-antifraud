@@ -71,6 +71,8 @@ class WCAF_Settings {
 			self::register_blacklist_fields();
 		} elseif ( 'notifications' === $tab ) {
 			self::register_notification_fields();
+		} elseif ( 'reports' === $tab ) {
+			self::register_reports_fields();
 		}
 	}
 
@@ -123,6 +125,19 @@ class WCAF_Settings {
 		add_settings_field( 'email_recipients', __( 'Alert email recipients', 'wc-antifraud' ), [ __CLASS__, 'field_recipients' ], 'wc-antifraud', 'wcaf_notif' );
 	}
 
+	/**
+	 * Reports-tab fields (AbuseIPDB community reporting), registered on a
+	 * dedicated page slug so the form at the bottom of the Reports tab
+	 * renders only this section.
+	 */
+	private static function register_reports_fields() {
+		add_settings_section( 'wcaf_abuseipdb', __( 'AbuseIPDB Reporting', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'Report the IPs behind fraud orders to the AbuseIPDB community database (abuseipdb.com), helping other stores and firewalls block the same attackers. Reports contain only the IP, the detection reasons, and the order timestamp — never customer data.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud-reports' );
+		add_settings_field( 'enable_abuseipdb', __( 'Report fraud IPs to AbuseIPDB', 'wc-antifraud' ), [ __CLASS__, 'field_enable_abuseipdb' ], 'wc-antifraud-reports', 'wcaf_abuseipdb' );
+		add_settings_field( 'abuseipdb_api_key', __( 'AbuseIPDB API key', 'wc-antifraud' ), [ __CLASS__, 'field_abuseipdb_api_key' ], 'wc-antifraud-reports', 'wcaf_abuseipdb' );
+	}
+
 	// ── Sanitize ──────────────────────────────────────────────────────
 
 	public static function sanitize( $input ) {
@@ -154,6 +169,14 @@ class WCAF_Settings {
 			$output['email_recipients'] = isset( $input['email_recipients'] ) ? sanitize_text_field( $input['email_recipients'] ) : '';
 			if ( ! empty( $output['email_recipients'] ) && empty( WCAF_Helpers::sanitize_email_list( $output['email_recipients'] ) ) ) {
 				add_settings_error( 'email_recipients', 'invalid_emails', __( 'Please provide valid email addresses.', 'wc-antifraud' ), 'error' );
+			}
+		}
+
+		if ( 'reports' === $tab ) {
+			$output['enable_abuseipdb']  = ! empty( $input['enable_abuseipdb'] ) ? 1 : 0;
+			$output['abuseipdb_api_key'] = isset( $input['abuseipdb_api_key'] ) ? sanitize_text_field( $input['abuseipdb_api_key'] ) : '';
+			if ( $output['enable_abuseipdb'] && empty( $output['abuseipdb_api_key'] ) ) {
+				add_settings_error( 'abuseipdb_api_key', 'missing_abuseipdb_key', __( 'AbuseIPDB reporting is enabled but no API key is set — no reports will be sent until you add one.', 'wc-antifraud' ), 'warning' );
 			}
 		}
 
@@ -327,6 +350,16 @@ class WCAF_Settings {
 			<?php self::render_report_table( __( 'Top Fraud Emails', 'wc-antifraud' ), __( 'Email', 'wc-antifraud' ), array_slice( $fraud_emails, 0, 10, true ) ); ?>
 			<?php self::render_report_table( __( 'Top Fraud IPs', 'wc-antifraud' ), __( 'IP Address', 'wc-antifraud' ), array_slice( $fraud_ips, 0, 10, true ) ); ?>
 		</div>
+
+		<!-- AbuseIPDB community reporting settings -->
+		<div class="wcaf-card" style="margin-top:20px;">
+			<form method="post" action="options.php">
+				<input type="hidden" name="wcaf_current_tab" value="reports" />
+				<?php settings_fields( 'wcaf_group' ); ?>
+				<?php do_settings_sections( 'wc-antifraud-reports' ); ?>
+				<?php submit_button( __( 'Save Settings', 'wc-antifraud' ) ); ?>
+			</form>
+		</div>
 		<?php
 	}
 
@@ -465,6 +498,28 @@ class WCAF_Settings {
 		printf( '<input name="%s[email_recipients]" type="text" value="%s" class="large-text" /><p class="description">%s</p>',
 			esc_attr( self::key() ), esc_attr( $o['email_recipients'] ),
 			esc_html__( 'Comma-separated emails that receive fraud alerts.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_enable_abuseipdb() {
+		$o = self::opt();
+		printf( '<label><input name="%s[enable_abuseipdb]" type="checkbox" value="1" %s /> %s</label><p class="description">%s</p>',
+			esc_attr( self::key() ), checked( 1, $o['enable_abuseipdb'], false ),
+			esc_html__( 'Report the IP of every order marked as fraud (automatic or manual) to AbuseIPDB', 'wc-antifraud' ),
+			esc_html__( 'Categories: Fraud Orders + Web App Attack. Each IP is reported at most once per 15 minutes (API rule) and orders older than two months are skipped (the API rejects older timestamps). A note with the result is added to the order.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_abuseipdb_api_key() {
+		$o           = self::opt();
+		$description = sprintf(
+			/* translators: %s: AbuseIPDB URL */
+			__( 'Free API key from <a href="%s" target="_blank" rel="noopener noreferrer">abuseipdb.com</a> (Account → API). The free tier allows 1,000 reports per day.', 'wc-antifraud' ),
+			esc_url( 'https://www.abuseipdb.com/' )
+		);
+		printf( '<input name="%s[abuseipdb_api_key]" type="text" value="%s" class="large-text" autocomplete="off" /><p class="description">%s</p>',
+			esc_attr( self::key() ), esc_attr( $o['abuseipdb_api_key'] ),
+			wp_kses( $description, [ 'a' => [ 'href' => [], 'target' => [], 'rel' => [] ] ] )
 		);
 	}
 

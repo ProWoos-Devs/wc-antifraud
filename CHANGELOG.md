@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-02
+
+### Added
+- AbuseIPDB reporting: the IP behind every order marked as fraud (automatic detection or manual bulk action) is reported to the [AbuseIPDB](https://www.abuseipdb.com/) community database with categories Fraud Orders + Web App Attack, so other stores and firewalls consuming AbuseIPDB blocklists can block the same attackers.
+- Opt-in via the settings form at the bottom of the Reports tab: enable toggle + API key field (free tier allows 1,000 reports/day). Reports contain only the IP, the detection reasons, and the order timestamp — never customer PII.
+- Safety rails per AbuseIPDB API rules: one report per IP per 15 minutes, orders older than two months are skipped (the API rejects older timestamps), private/reserved IPs are never reported, and each order is reported at most once (`_wcaf_abuseipdb_reported` meta). A note with the returned abuse confidence score is added to the order.
+
 ## [1.2.0] - 2026-07-01
 
 ### Added
