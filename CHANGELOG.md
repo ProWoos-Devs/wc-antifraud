@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-11
+
+### Added
+- Stripe decline intelligence: every failed Stripe payment now gets a structured decline record (`_wcaf_stripe_decline` meta), a plain-English order note, and a prominent "Stripe decline" panel on the order edit screen showing the verdict, risk level, Radar rule, decline code, card details, and a "Review it in the Stripe Dashboard" link to the exact payment.
+- New "Cancelled by Stripe" order status (slug `fraud-stripe`): orders whose payment Stripe blocks as fraudulent (Radar block, or issuer decline codes fraudulent / stolen_card / lost_card / pickup_card / merchant_blacklist) are automatically moved to it. Toggle in Detection Rules under Gateway Fraud Signals, on by default; the decline record and panel are written regardless of the toggle.
+- Stripe-detected fraud shows a distinct blurple "Fraud (Stripe)" badge in the Fraud column (own detections stay red), and its own filter link on the Orders list.
+
+### Changed
+- Status labels renamed: "Fraud — Auto Cancelled" is now "Auto Cancelled" and the new status reads "Cancelled by Stripe". Slugs are unchanged, so existing orders are unaffected; the fraud designation lives in the badge column.
+- `mark_as_fraud()` accepts `$report_ip` and `$status` arguments. Stripe-verdict markings never report to AbuseIPDB: a Radar block can false-positive on a real customer, and AbuseIPDB reports are public and irreversible, unlike the order status.
+
+### Fixed
+- Documented hard constraint: custom order status slugs must be 20 characters or fewer (`wp_posts.post_status` is varchar(20)); longer slugs fail to persist silently while WooCommerce carries on.
+
 ## [1.3.0] - 2026-07-02
 
 ### Added

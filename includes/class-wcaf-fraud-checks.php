@@ -100,7 +100,7 @@ class WCAF_Fraud_Checks {
 		}
 		// Skip if already marked as fraud (prevents re-processing when several of
 		// the post-payment hooks fire for the same order).
-		if ( 'fraud-auto-cancelled' === $order->get_status() ) {
+		if ( in_array( $order->get_status(), WCAF_Order_Status::fraud_statuses(), true ) ) {
 			return;
 		}
 		$reasons = $this->detect_fraud_indicators( $order );
@@ -119,7 +119,7 @@ class WCAF_Fraud_Checks {
 		if ( ! $order ) {
 			return;
 		}
-		if ( 'fraud-auto-cancelled' === $order->get_status() ) {
+		if ( in_array( $order->get_status(), WCAF_Order_Status::fraud_statuses(), true ) ) {
 			return;
 		}
 

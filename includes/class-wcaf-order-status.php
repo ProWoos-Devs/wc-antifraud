@@ -24,6 +24,19 @@ class WCAF_Order_Status {
 	const STATUS_WC_KEY = 'wc-fraud-auto-cancelled';
 
 	/**
+	 * Post status slug for orders whose fraud verdict came from Stripe itself
+	 * (Radar block or issuer fraud decline code), as stored in the database.
+	 * NOTE: post_status is varchar(20) — slugs longer than 20 chars fail to
+	 * save silently (MySQL rejects the write while WC carries on).
+	 */
+	const STRIPE_STATUS_SLUG = 'fraud-stripe';
+
+	/**
+	 * wc_order_statuses key for the Stripe fraud status
+	 */
+	const STRIPE_STATUS_WC_KEY = 'wc-fraud-stripe';
+
+	/**
 	 * Bulk action key on the Orders list table.
 	 */
 	const BULK_ACTION = 'wcaf_mark_as_fraud';
@@ -59,18 +72,46 @@ class WCAF_Order_Status {
 		add_action( 'woocommerce_shop_order_list_table_custom_column', [ __CLASS__, 'render_fraud_column_hpos' ], 10, 2 );
 	}
 
+	/**
+	 * The plugin's fraud status slugs (own detections + Stripe verdicts).
+	 *
+	 * Use this wherever "is the order already marked fraud" is checked so both
+	 * statuses are treated alike.
+	 *
+	 * @return array
+	 */
+	public static function fraud_statuses() {
+		return [ self::STATUS_SLUG, self::STRIPE_STATUS_SLUG ];
+	}
+
 	public static function register_status() {
 		register_post_status(
 			self::STATUS_SLUG,
 			[
-				'label'                     => _x( 'Fraud — Auto Cancelled', 'Order status', 'wc-antifraud' ),
+				'label'                     => _x( 'Auto Cancelled', 'Order status', 'wc-antifraud' ),
 				'public'                    => false,
 				'exclude_from_search'       => false,
 				'show_in_admin_all_list'    => true,
 				'show_in_admin_status_list' => true,
 				'label_count'               => _n_noop(
-					'Fraud — Auto Cancelled <span class="count">(%s)</span>',
-					'Fraud — Auto Cancelled <span class="count">(%s)</span>',
+					'Auto Cancelled <span class="count">(%s)</span>',
+					'Auto Cancelled <span class="count">(%s)</span>',
+					'wc-antifraud'
+				),
+			]
+		);
+
+		register_post_status(
+			self::STRIPE_STATUS_SLUG,
+			[
+				'label'                     => _x( 'Cancelled by Stripe', 'Order status', 'wc-antifraud' ),
+				'public'                    => false,
+				'exclude_from_search'       => false,
+				'show_in_admin_all_list'    => true,
+				'show_in_admin_status_list' => true,
+				'label_count'               => _n_noop(
+					'Cancelled by Stripe <span class="count">(%s)</span>',
+					'Cancelled by Stripe <span class="count">(%s)</span>',
 					'wc-antifraud'
 				),
 			]
@@ -78,7 +119,8 @@ class WCAF_Order_Status {
 	}
 
 	public static function add_status_to_list( $statuses ) {
-		$statuses[ self::STATUS_WC_KEY ] = _x( 'Fraud — Auto Cancelled', 'Order status', 'wc-antifraud' );
+		$statuses[ self::STATUS_WC_KEY ]        = _x( 'Auto Cancelled', 'Order status', 'wc-antifraud' );
+		$statuses[ self::STRIPE_STATUS_WC_KEY ] = _x( 'Cancelled by Stripe', 'Order status', 'wc-antifraud' );
 		return $statuses;
 	}
 
@@ -93,65 +135,88 @@ class WCAF_Order_Status {
 	 * @return array Modified views
 	 */
 	public static function add_status_filter_link( $views ) {
-		$count = self::get_fraud_order_count();
+		$links = [
+			self::STATUS_SLUG        => __( 'Auto Cancelled', 'wc-antifraud' ),
+			self::STRIPE_STATUS_SLUG => __( 'Cancelled by Stripe', 'wc-antifraud' ),
+		];
 
-		$current = '';
-		if ( isset( $_GET['status'] ) && self::STATUS_SLUG === $_GET['status'] ) {
-			$current = ' class="current"';
-		} elseif ( isset( $_GET['post_status'] ) && self::STATUS_SLUG === $_GET['post_status'] ) {
-			$current = ' class="current"';
+		$hpos = class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' )
+			&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+
+		foreach ( $links as $slug => $label_text ) {
+			$count = self::get_fraud_order_count( $slug );
+
+			$current = '';
+			if ( isset( $_GET['status'] ) && $slug === $_GET['status'] ) {
+				$current = ' class="current"';
+			} elseif ( isset( $_GET['post_status'] ) && $slug === $_GET['post_status'] ) {
+				$current = ' class="current"';
+			}
+
+			$url = $hpos
+				? admin_url( 'admin.php?page=wc-orders&status=' . $slug )
+				: admin_url( 'edit.php?post_type=shop_order&post_status=' . $slug );
+
+			$label = sprintf(
+				$label_text . ' <span class="count">(%s)</span>',
+				number_format_i18n( $count )
+			);
+
+			$views[ $slug ] = sprintf( '<a href="%s"%s>%s</a>', esc_url( $url ), $current, $label );
 		}
-
-		$url = admin_url( 'edit.php?post_type=shop_order&post_status=' . self::STATUS_SLUG );
-		if ( class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' )
-			&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled() ) {
-			$url = admin_url( 'admin.php?page=wc-orders&status=' . self::STATUS_SLUG );
-		}
-
-		$label = sprintf(
-			__( 'Fraud', 'wc-antifraud' )
-			. ' <span class="count">(%s)</span>',
-			number_format_i18n( $count )
-		);
-
-		$views[ self::STATUS_SLUG ] = sprintf( '<a href="%s"%s>%s</a>', esc_url( $url ), $current, $label );
 
 		return $views;
 	}
 
 	/**
-	 * Count orders with fraud status
+	 * Count orders with a fraud status
 	 *
+	 * @param string $slug Status slug to count (defaults to the classic fraud status)
 	 * @return int
 	 */
-	private static function get_fraud_order_count() {
+	private static function get_fraud_order_count( $slug = self::STATUS_SLUG ) {
 		$counts = wp_count_posts( 'shop_order' );
-		$slug   = self::STATUS_SLUG;
 		return isset( $counts->$slug ) ? (int) $counts->$slug : 0;
 	}
 
 	/**
 	 * Mark order as fraud
 	 *
-	 * @param WC_Order $order
-	 * @param array    $reasons
+	 * @param WC_Order $order     Order object
+	 * @param array    $reasons   Array of fraud reasons
+	 * @param bool     $report_ip Whether to report the customer IP to AbuseIPDB.
+	 *                            Pass false for detections that can false-positive
+	 *                            on a real customer (e.g. Stripe Radar blocks) —
+	 *                            AbuseIPDB reports are public and not reversible,
+	 *                            unlike the fraud status itself.
+	 * @param string   $status    Fraud status slug to set. Defaults to the classic
+	 *                            "Auto Cancelled"; the Stripe decline handler passes
+	 *                            STRIPE_STATUS_SLUG ("Cancelled by Stripe") so
+	 *                            gateway verdicts are distinguishable.
 	 * @return bool
 	 */
-	public static function mark_as_fraud( $order, $reasons ) {
+	public static function mark_as_fraud( $order, $reasons, $report_ip = true, $status = self::STATUS_SLUG ) {
 		if ( ! $order ) {
 			return false;
 		}
+
+		if ( ! in_array( $status, self::fraud_statuses(), true ) ) {
+			$status = self::STATUS_SLUG;
+		}
+
 		$note = sprintf( __( 'Order automatically marked as fraud. Reasons: %s', 'wc-antifraud' ), implode( ', ', $reasons ) );
 		// Persistent fraud flag — survives a later refund that would otherwise
 		// relabel the order as Refunded and hide the fraud designation.
 		// update_status() calls save(), which persists this pending meta.
 		$order->update_meta_data( self::FRAUD_FLAG_META, 'yes' );
-		$order->update_status( self::STATUS_SLUG, $note );
+		$order->update_status( $status, $note );
 
 		// Report the attacking IP to AbuseIPDB (no-op unless enabled and an
 		// API key is configured). Runs here so both automatic detections and
 		// the manual bulk action feed the community database.
-		WCAF_AbuseIPDB::report_order( $order, $reasons );
+		if ( $report_ip ) {
+			WCAF_AbuseIPDB::report_order( $order, $reasons );
+		}
 
 		return true;
 	}
@@ -169,7 +234,7 @@ class WCAF_Order_Status {
 		if ( ! $order ) {
 			return false;
 		}
-		return self::STATUS_SLUG === $order->get_status()
+		return in_array( $order->get_status(), self::fraud_statuses(), true )
 			|| 'yes' === $order->get_meta( self::FRAUD_FLAG_META );
 	}
 
@@ -209,7 +274,7 @@ class WCAF_Order_Status {
 			if ( ! $order ) {
 				continue;
 			}
-			if ( self::STATUS_SLUG === $order->get_status() ) {
+			if ( in_array( $order->get_status(), self::fraud_statuses(), true ) ) {
 				continue;
 			}
 			if ( self::mark_as_fraud( $order, [ __( 'Manually marked as fraud by admin', 'wc-antifraud' ) ] ) ) {
@@ -294,15 +359,24 @@ class WCAF_Order_Status {
 	/**
 	 * Output a "Fraud" status pill for a flagged order (nothing otherwise).
 	 *
+	 * Red for the plugin's own detections; Stripe blurple when the verdict came
+	 * from Stripe (Radar block / issuer fraud decline), so the source is visible
+	 * at a glance on the Orders list.
+	 *
 	 * @param WC_Order|false $order
 	 */
 	private static function output_fraud_badge( $order ) {
 		if ( ! self::is_fraud_order( $order ) ) {
 			return;
 		}
+
+		$stripe_verdict = self::STRIPE_STATUS_SLUG === $order->get_status()
+			|| '' !== (string) $order->get_meta( '_wcaf_stripe_decline' );
+
 		printf(
-			'<mark class="order-status" style="background:#d63638;color:#fff;"><span>%s</span></mark>',
-			esc_html__( 'Fraud', 'wc-antifraud' )
+			'<mark class="order-status" style="background:%s;color:#fff;"><span>%s</span></mark>',
+			$stripe_verdict ? '#635bff' : '#d63638',
+			$stripe_verdict ? esc_html__( 'Fraud (Stripe)', 'wc-antifraud' ) : esc_html__( 'Fraud', 'wc-antifraud' )
 		);
 	}
 }

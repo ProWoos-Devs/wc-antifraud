@@ -54,6 +54,7 @@ class WC_Antifraud {
 		require_once $dir . 'class-wcaf-abuseipdb.php';
 		require_once $dir . 'class-wcaf-order-status.php';
 		require_once $dir . 'class-wcaf-fraud-checks.php';
+		require_once $dir . 'class-wcaf-stripe-decline.php';
 		require_once $dir . 'class-wcaf-rest-hardening.php';
 		require_once $dir . 'class-wcaf-settings.php';
 		require_once $dir . 'class-wcaf-github-updater.php';
@@ -97,6 +98,11 @@ class WC_Antifraud {
 		}
 
 		new WCAF_Fraud_Checks();
+
+		// Record Stripe decline detail on failed orders (no-op if the Stripe
+		// gateway is not active — its webhook action simply never fires)
+		WCAF_Stripe_Decline::init();
+
 		WCAF_REST_Hardening::init();
 	}
 
@@ -130,6 +136,7 @@ class WC_Antifraud {
 			'amount_tolerance'      => 0.01,
 			'email_recipients'      => get_option( 'admin_email' ),
 			'enable_unknown_origin' => 1,
+			'enable_stripe_decline' => 1,
 			'enable_disposable'     => 0,
 			'disposable_domains'    => '',
 			'enable_proxy_check'    => 0,

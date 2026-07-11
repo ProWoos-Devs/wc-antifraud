@@ -82,6 +82,11 @@ class WCAF_Settings {
 		}, 'wc-antifraud' );
 		add_settings_field( 'enable_unknown_origin', __( 'Unknown origin blocking', 'wc-antifraud' ), [ __CLASS__, 'field_unknown_origin' ], 'wc-antifraud', 'wcaf_origin' );
 
+		add_settings_section( 'wcaf_gateway', __( 'Gateway Fraud Signals', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'Act on fraud signals reported by the payment gateway itself.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud' );
+		add_settings_field( 'enable_stripe_decline', __( 'Stripe fraud-decline tagging', 'wc-antifraud' ), [ __CLASS__, 'field_stripe_decline' ], 'wc-antifraud', 'wcaf_gateway' );
+
 		add_settings_section( 'wcaf_amount', __( 'Suspicious Amount', 'wc-antifraud' ), function () {
 			echo '<p>' . esc_html__( 'Flag orders matching a known fraudulent amount pattern.', 'wc-antifraud' ) . '</p>';
 		}, 'wc-antifraud' );
@@ -148,6 +153,7 @@ class WCAF_Settings {
 
 		if ( 'detection' === $tab ) {
 			$output['enable_unknown_origin'] = ! empty( $input['enable_unknown_origin'] ) ? 1 : 0;
+			$output['enable_stripe_decline'] = ! empty( $input['enable_stripe_decline'] ) ? 1 : 0;
 			$output['enable_proxy_check']     = ! empty( $input['enable_proxy_check'] ) ? 1 : 0;
 			$output['enable_ip_repeat']       = ! empty( $input['enable_ip_repeat'] ) ? 1 : 0;
 			$output['enable_rest_hardening']  = ! empty( $input['enable_rest_hardening'] ) ? 1 : 0;
@@ -236,7 +242,7 @@ class WCAF_Settings {
 		$order_ids = $wpdb->get_col(
 			"SELECT ID FROM {$wpdb->posts}
 			 WHERE post_type = 'shop_order'
-			 AND post_status = 'fraud-auto-cancelled'
+			 AND post_status IN ('fraud-auto-cancelled','fraud-stripe')
 			 ORDER BY post_date DESC
 			 LIMIT 50"
 		);
@@ -291,7 +297,7 @@ class WCAF_Settings {
 		global $wpdb;
 		$date_sql = $wpdb->prepare( '%s', $date_after . ' 00:00:00' );
 
-		$fraud_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status='fraud-auto-cancelled' AND post_date >= {$date_sql}" );
+		$fraud_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('fraud-auto-cancelled','fraud-stripe') AND post_date >= {$date_sql}" );
 		$legit_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-processing','wc-completed','wc-on-hold') AND post_date >= {$date_sql}" );
 		$failed_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-failed','wc-cancelled') AND post_date >= {$date_sql}" );
 		$total_count  = $fraud_count + $legit_count + $failed_count;
@@ -300,7 +306,7 @@ class WCAF_Settings {
 		$fraud_order_ids = $wpdb->get_col( $wpdb->prepare(
 			"SELECT ID FROM {$wpdb->posts}
 			 WHERE post_type = 'shop_order'
-			 AND post_status = 'fraud-auto-cancelled'
+			 AND post_status IN ('fraud-auto-cancelled','fraud-stripe')
 			 AND post_date >= %s
 			 ORDER BY post_date DESC
 			 LIMIT 100",
@@ -391,6 +397,15 @@ class WCAF_Settings {
 			esc_attr( self::key() ), checked( 1, $o['enable_unknown_origin'], false ),
 			esc_html__( 'Flag all unknown-origin orders as fraud (classic checkout included)', 'wc-antifraud' ),
 			esc_html__( 'Marks any order with no WooCommerce attribution data as fraud, whether placed through the classic checkout or the Store API. Store API bot orders are always caught regardless of this setting; enabling this extends the same rule to classic-checkout orders. Only customer-facing paths are affected — admin/manual, subscription, and API-integration orders are never flagged. Recommended: on.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_stripe_decline() {
+		$o = self::opt();
+		printf( '<label><input name="%s[enable_stripe_decline]" type="checkbox" value="1" %s /> %s</label><p class="description">%s</p>',
+			esc_attr( self::key() ), checked( 1, $o['enable_stripe_decline'], false ),
+			esc_html__( 'Mark orders as "Cancelled by Stripe" when Stripe reports the decline as fraudulent', 'wc-antifraud' ),
+			esc_html__( 'Applies when Stripe Radar blocks a payment as too risky, or the card issuer returns a fraud decline code (fraudulent, stolen/lost/pickup card, merchant blacklist). Only ever affects orders whose payment already failed — the customer is never charged. A detailed decline note and a decline panel on the order screen (risk level, decline code, card details, Stripe Dashboard link) are recorded on every failed Stripe order regardless of this setting. These orders are NOT reported to AbuseIPDB, because a gateway fraud signal can occasionally belong to a real customer.', 'wc-antifraud' )
 		);
 	}
 
