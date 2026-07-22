@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-22
+
+### Added
+- Single **Fraud** view on the Orders list covering every order the plugin treats as fraud, whichever gateway produced the verdict: both fraud statuses plus any order still carrying the persistent fraud flag. That last part matters, because refunding a fraud order relabels it Refunded and it disappears from the status filters, which is exactly when you most want to still see it.
+
+### Changed
+- The "Auto Cancelled" and "Cancelled by Stripe" filter links have been removed from the Orders list. Both are now folded into the single Fraud view. The statuses themselves are unchanged: they keep their labels on the order and in the status dropdown, and the badge column still tells the sources apart, red "Fraud" for the plugin's own detections and blurple "Fraud (Stripe)" for gateway verdicts.
+- Stores running HPOS keep the two per-status links, since the combined view is built on a `posts_where` clause that the HPOS orders table does not run through.
+
 ## [1.4.0] - 2026-07-11
 
 ### Added

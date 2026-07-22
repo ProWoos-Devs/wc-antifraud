@@ -1,6 +1,6 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.4.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.5.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
@@ -8,7 +8,7 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, blacklists (email, IP, phone), suspicious amount detection, rate limiting, REST API hardening, and automated fraud management with email alerts.
 
-> **Current Version: 1.4.0** | **Released: July 11, 2026**
+> **Current Version: 1.5.0** | **Released: July 22, 2026**
 
 ## Features
 
@@ -33,6 +33,7 @@
 
 ### Automated Fraud Management
 - Custom order statuses: "Auto Cancelled" (plugin detections) and "Cancelled by Stripe" (gateway fraud verdicts)
+- Single "Fraud" view on the Orders list gathering every fraud order from both statuses, plus any that a refund has since relabelled Refunded
 - Stripe decline intelligence - failed Stripe payments get the real decline reason (Radar block, risk level, decline code, card) as an order note, order meta, and a panel on the order screen with a direct Stripe Dashboard link; Radar-blocked / issuer-fraud-declined orders are auto-marked as fraud (no AbuseIPDB reporting for gateway verdicts)
 - Email alerts with order details and fraud indicators
 - AbuseIPDB reporting - opt-in reporting of fraud-order IPs to the [AbuseIPDB](https://www.abuseipdb.com/) community database (categories: Fraud Orders + Web App Attack), no customer PII ever included

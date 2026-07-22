@@ -42,6 +42,20 @@ class WCAF_Order_Status {
 	const BULK_ACTION = 'wcaf_mark_as_fraud';
 
 	/**
+	 * Query var backing the combined "Fraud" view on the Orders list.
+	 *
+	 * Replaces the two per-status filter links. Neither of those showed the whole
+	 * picture on its own, and a fraud order that is later refunded moves to the
+	 * Refunded status and drops out of both.
+	 */
+	const VIEW_QUERY_VAR = 'wcaf_view';
+
+	/**
+	 * Value of self::VIEW_QUERY_VAR that selects the combined fraud view.
+	 */
+	const VIEW_FRAUD = 'fraud';
+
+	/**
 	 * Order meta key holding the persistent fraud flag.
 	 *
 	 * Set whenever an order is marked as fraud and never cleared automatically,
@@ -56,6 +70,10 @@ class WCAF_Order_Status {
 		add_filter( 'woocommerce_reports_order_statuses', [ __CLASS__, 'exclude_from_reports' ] );
 		add_filter( 'views_edit-shop_order', [ __CLASS__, 'add_status_filter_link' ] );
 		add_filter( 'woocommerce_shop_order_list_table_views', [ __CLASS__, 'add_status_filter_link' ] );
+
+		// Combined "Fraud" view (classic Orders screen). Spans both fraud
+		// statuses plus any order still carrying the persistent fraud flag.
+		add_action( 'pre_get_posts', [ __CLASS__, 'apply_fraud_view_query' ] );
 
 		// "Change status to Fraud" bulk action on the Orders list (classic + HPOS).
 		add_filter( 'bulk_actions-edit-shop_order', [ __CLASS__, 'register_bulk_action' ] );
@@ -135,48 +153,134 @@ class WCAF_Order_Status {
 	 * @return array Modified views
 	 */
 	public static function add_status_filter_link( $views ) {
-		$links = [
-			self::STATUS_SLUG        => __( 'Auto Cancelled', 'wc-antifraud' ),
-			self::STRIPE_STATUS_SLUG => __( 'Cancelled by Stripe', 'wc-antifraud' ),
-		];
-
 		$hpos = class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' )
 			&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
 
-		foreach ( $links as $slug => $label_text ) {
-			$count = self::get_fraud_order_count( $slug );
-
-			$current = '';
-			if ( isset( $_GET['status'] ) && $slug === $_GET['status'] ) {
-				$current = ' class="current"';
-			} elseif ( isset( $_GET['post_status'] ) && $slug === $_GET['post_status'] ) {
-				$current = ' class="current"';
-			}
-
-			$url = $hpos
-				? admin_url( 'admin.php?page=wc-orders&status=' . $slug )
-				: admin_url( 'edit.php?post_type=shop_order&post_status=' . $slug );
-
-			$label = sprintf(
-				$label_text . ' <span class="count">(%s)</span>',
-				number_format_i18n( $count )
-			);
-
-			$views[ $slug ] = sprintf( '<a href="%s"%s>%s</a>', esc_url( $url ), $current, $label );
+		// The combined view is a posts_where clause, which the HPOS orders table
+		// never runs through. Leave WordPress's own per-status views in place
+		// there rather than removing the only way to filter fraud orders.
+		if ( $hpos ) {
+			return $views;
 		}
+
+		// WordPress builds a view for each custom status automatically (both are
+		// registered with show_in_admin_status_list).
+		unset( $views[ self::STATUS_SLUG ], $views[ self::STRIPE_STATUS_SLUG ] );
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list filter.
+		$is_current = isset( $_GET[ self::VIEW_QUERY_VAR ] ) && self::VIEW_FRAUD === $_GET[ self::VIEW_QUERY_VAR ];
+
+		$views['wcaf_fraud_all'] = sprintf(
+			'<a href="%s"%s>%s</a>',
+			esc_url( admin_url( 'edit.php?post_type=shop_order&' . self::VIEW_QUERY_VAR . '=' . self::VIEW_FRAUD ) ),
+			$is_current ? ' class="current"' : '',
+			sprintf(
+				/* translators: %s: number of orders */
+				__( 'Fraud', 'wc-antifraud' ) . ' <span class="count">(%s)</span>',
+				number_format_i18n( self::get_all_fraud_order_count() )
+			)
+		);
 
 		return $views;
 	}
 
 	/**
-	 * Count orders with a fraud status
+	 * SQL predicate matching every order the plugin considers fraud.
 	 *
-	 * @param string $slug Status slug to count (defaults to the classic fraud status)
+	 * Either of the two fraud statuses, or the persistent flag on an order whose
+	 * status has since moved on (a refund relabels a fraud order Refunded). The
+	 * flag is matched loosely so flags written directly to the database as '1'
+	 * rather than 'yes' are still picked up.
+	 *
+	 * @param string $posts_table Posts table name to qualify columns with.
+	 * @return string SQL fragment, already escaped, wrapped in parentheses.
+	 */
+	private static function fraud_sql_predicate( $posts_table ) {
+		global $wpdb;
+
+		$statuses     = self::fraud_statuses();
+		$placeholders = implode( ', ', array_fill( 0, count( $statuses ), '%s' ) );
+
+		return $wpdb->prepare(
+			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table/placeholders built above.
+			"( {$posts_table}.post_status IN ( {$placeholders} )
+				OR EXISTS (
+					SELECT 1 FROM {$wpdb->postmeta} wcaf_flag
+					WHERE wcaf_flag.post_id = {$posts_table}.ID
+						AND wcaf_flag.meta_key = %s
+						AND wcaf_flag.meta_value IN ( 'yes', '1' )
+				) )",
+			// phpcs:enable
+			array_merge( $statuses, [ self::FRAUD_FLAG_META ] )
+		);
+	}
+
+	/**
+	 * Count every order matching the combined fraud view.
+	 *
 	 * @return int
 	 */
-	private static function get_fraud_order_count( $slug = self::STATUS_SLUG ) {
-		$counts = wp_count_posts( 'shop_order' );
-		return isset( $counts->$slug ) ? (int) $counts->$slug : 0;
+	private static function get_all_fraud_order_count() {
+		global $wpdb;
+
+		$count = wp_cache_get( 'wcaf_all_fraud_count', 'wc-antifraud' );
+		if ( false !== $count ) {
+			return (int) $count;
+		}
+
+		$count = (int) $wpdb->get_var(
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- predicate is prepared.
+			"SELECT COUNT(*) FROM {$wpdb->posts}
+			WHERE post_type = 'shop_order'
+				AND post_status != 'trash'
+				AND " . self::fraud_sql_predicate( $wpdb->posts )
+		);
+
+		wp_cache_set( 'wcaf_all_fraud_count', $count, 'wc-antifraud', 5 * MINUTE_IN_SECONDS );
+
+		return $count;
+	}
+
+	/**
+	 * Point the main Orders query at the combined fraud view when it is selected.
+	 *
+	 * @param WP_Query $query Query being prepared.
+	 */
+	public static function apply_fraud_view_query( $query ) {
+		if ( ! is_admin() || ! $query->is_main_query() ) {
+			return;
+		}
+		if ( 'shop_order' !== $query->get( 'post_type' ) ) {
+			return;
+		}
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only list filter.
+		if ( ! isset( $_GET[ self::VIEW_QUERY_VAR ] ) || self::VIEW_FRAUD !== $_GET[ self::VIEW_QUERY_VAR ] ) {
+			return;
+		}
+
+		// 'any' resolves to every status with exclude_from_search false, which
+		// covers the two fraud statuses and leaves trash out. The status/flag OR
+		// itself cannot be expressed through WP_Query, hence the where filter.
+		$query->set( 'post_status', 'any' );
+		add_filter( 'posts_where', [ __CLASS__, 'fraud_view_where' ], 10, 2 );
+	}
+
+	/**
+	 * Restrict the fraud view to fraud orders.
+	 *
+	 * Detaches itself immediately so it can only ever affect the one query it
+	 * was attached for.
+	 *
+	 * @param string   $where Current WHERE clause.
+	 * @param WP_Query $query Query being run.
+	 * @return string
+	 */
+	public static function fraud_view_where( $where, $query ) {
+		remove_filter( 'posts_where', [ __CLASS__, 'fraud_view_where' ], 10 );
+
+		global $wpdb;
+
+		return $where . ' AND ' . self::fraud_sql_predicate( $wpdb->posts );
 	}
 
 	/**
