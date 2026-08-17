@@ -1,6 +1,6 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.5.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.5.1-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
@@ -8,7 +8,7 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, blacklists (email, IP, phone), suspicious amount detection, rate limiting, REST API hardening, and automated fraud management with email alerts.
 
-> **Current Version: 1.5.0** | **Released: July 22, 2026**
+> **Current Version: 1.5.1** | **Released: August 17, 2026**
 
 ## Features
 

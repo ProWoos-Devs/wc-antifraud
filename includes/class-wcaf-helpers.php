@@ -203,6 +203,23 @@ class WCAF_Helpers {
 	 * @param float $tolerance
 	 * @return bool
 	 */
+	/**
+	 * Whether WooCommerce's Order Attribution feature is on for this store.
+	 *
+	 * Every attribution-based rule (unknown origin, Store API bot) reads
+	 * _wc_order_attribution_source_type, which only exists when the feature is
+	 * enabled (WooCommerce > Settings > Advanced > Features). With it off, no order
+	 * carries attribution, so those rules would flag every genuine order.
+	 *
+	 * @return bool
+	 */
+	public static function order_attribution_enabled() {
+		if ( class_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil' ) && method_exists( '\Automattic\WooCommerce\Utilities\FeaturesUtil', 'feature_is_enabled' ) ) {
+			return (bool) \Automattic\WooCommerce\Utilities\FeaturesUtil::feature_is_enabled( 'order_attribution' );
+		}
+		return 'yes' === get_option( 'woocommerce_feature_order_attribution_enabled', 'yes' );
+	}
+
 	public static function is_amount_suspicious( $amount, $target, $tolerance ) {
 		if ( floatval( $target ) <= 0 ) {
 			return false;

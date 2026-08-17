@@ -398,6 +398,12 @@ class WCAF_Settings {
 			esc_html__( 'Flag all unknown-origin orders as fraud (classic checkout included)', 'wc-antifraud' ),
 			esc_html__( 'Marks any order with no WooCommerce attribution data as fraud, whether placed through the classic checkout or the Store API. Store API bot orders are always caught regardless of this setting; enabling this extends the same rule to classic-checkout orders. Only customer-facing paths are affected — admin/manual, subscription, and API-integration orders are never flagged. Recommended: on.', 'wc-antifraud' )
 		);
+		if ( ! WCAF_Helpers::order_attribution_enabled() ) {
+			printf(
+				'<p class="description" style="color:#b32d2e;font-weight:600;">%s</p>',
+				esc_html__( 'Inactive: WooCommerce\'s Order Attribution feature is turned off on this store (WooCommerce > Settings > Advanced > Features), so no order carries attribution data and this rule, together with the Store API bot check, is skipped. Enable Order Attribution to use them.', 'wc-antifraud' )
+			);
+		}
 	}
 
 	public static function field_stripe_decline() {

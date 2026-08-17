@@ -159,8 +159,13 @@ class WCAF_Fraud_Checks {
 		// Store API bot detection (always on).
 		// Orders created via store-api with no WC attribution data are bots
 		// posting directly to the API, bypassing the actual checkout page.
+		// Both attribution rules are skipped entirely when the store has WooCommerce's
+		// Order Attribution feature turned off: then NO order carries attribution and
+		// the rules would cancel every genuine order (seen on a live store, 1.5.1).
 		$created_via = $order->get_created_via();
-		if ( 'store-api' === $created_via && empty( $order->get_meta( '_wc_order_attribution_source_type' ) ) ) {
+		if ( ! WCAF_Helpers::order_attribution_enabled() ) {
+			// no attribution-based signal available on this store
+		} elseif ( 'store-api' === $created_via && empty( $order->get_meta( '_wc_order_attribution_source_type' ) ) ) {
 			$reasons[] = __( 'Store API Bot Order (no checkout session)', 'wc-antifraud' );
 		} elseif ( $this->is_unknown_origin_check_enabled() && $this->is_unknown_origin_order( $order ) ) {
 			// Unknown origin (optional toggle) — ANY customer-facing order with no
@@ -219,7 +224,7 @@ class WCAF_Fraud_Checks {
 	 * @return bool
 	 */
 	private function is_unknown_origin_check_enabled() {
-		return ! empty( $this->options['enable_unknown_origin'] );
+		return ! empty( $this->options['enable_unknown_origin'] ) && WCAF_Helpers::order_attribution_enabled();
 	}
 
 	/**

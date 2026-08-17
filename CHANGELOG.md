@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-08-17
+
+### Fixed
+- On stores where WooCommerce's Order Attribution feature is turned off, no order carries `_wc_order_attribution_source_type`, so the unknown-origin rule and the Store API bot check flagged every genuine order as fraud (auto-cancelled, downloads revoked). Both rules are now skipped when the feature is off, and the settings screen shows a red note next to "Unknown origin blocking" explaining that the rule is inactive until Order Attribution is enabled (WooCommerce > Settings > Advanced > Features).
+
 ## [1.5.0] - 2026-07-22
 
 ### Added
