@@ -16,7 +16,16 @@ class WCAF_Fraud_Checks {
 	public function __construct() {
 		$this->options = WCAF_Helpers::get_options();
 		add_action( 'woocommerce_check_cart_items', [ $this, 'check_cart_total' ] );
+
+		// Pre-payment checks, classic checkout.
 		add_action( 'woocommerce_after_checkout_validation', [ $this, 'check_checkout' ], 20, 2 );
+
+		// Pre-payment checks, Block Checkout / Store API. This action fires
+		// against the persisted draft order after billing data is applied and
+		// before payment; throwing a RouteException here refuses the checkout
+		// with a proper Store API error and no payment attempt is made.
+		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ $this, 'check_store_api_checkout' ], 5, 2 );
+
 		add_action( 'woocommerce_thankyou', [ $this, 'analyze_order_after_payment' ], 10, 1 );
 
 		// Server-side post-payment analysis. Carding bots check out via the Store
@@ -25,7 +34,7 @@ class WCAF_Fraud_Checks {
 		// stolen card works, the order goes straight to a paid status server-side
 		// and would otherwise escape detection. These hooks fire regardless of any
 		// browser page load. analyze_order_after_payment() is idempotent (skips
-		// orders already marked fraud-auto-cancelled).
+		// orders already marked fraud or already flagged in monitor mode).
 		add_action( 'woocommerce_payment_complete', [ $this, 'analyze_order_after_payment' ], 10, 1 );
 		add_action( 'woocommerce_order_status_processing', [ $this, 'analyze_order_after_payment' ], 10, 1 );
 		add_action( 'woocommerce_order_status_completed', [ $this, 'analyze_order_after_payment' ], 10, 1 );
@@ -51,41 +60,96 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
-	 * Checkout-time validation
+	 * Customer-facing message for a refused checkout.
+	 *
+	 * @return string
+	 */
+	private function block_message() {
+		return apply_filters(
+			'wcaf_checkout_block_message',
+			__( 'We cannot process your order due to security concerns. Please contact us if you believe this is a mistake.', 'wc-antifraud' )
+		);
+	}
+
+	/**
+	 * Checkout-time validation (classic checkout)
 	 *
 	 * @param array    $data
 	 * @param WP_Error $errors
 	 */
 	public function check_checkout( $data, $errors ) {
-		$block_msg = apply_filters(
-			'wcaf_checkout_block_message',
-			__( 'We cannot process your order due to security concerns. Please contact us if you believe this is a mistake.', 'wc-antifraud' )
-		);
-
 		// Note: Unknown origin is checked post-payment only (in analyze_order_after_payment).
 		// Blocking at checkout caused false positives for customers with cookie blockers,
 		// Safari ITP, or when WC attribution JS didn't load.
-
 		$email = isset( $data['billing_email'] ) ? $data['billing_email'] : '';
 		$phone = isset( $data['billing_phone'] ) ? $data['billing_phone'] : '';
-		$ip    = WCAF_Helpers::get_client_ip();
 
-		if ( ! empty( $email ) && WCAF_Helpers::is_email_address_blocked( $email, $this->options ) ) {
-			$errors->add( 'wcaf_blocked_email', $block_msg );
+		$reason = $this->pre_payment_block_reason( $email, $phone, WCAF_Helpers::get_client_ip() );
+		if ( '' !== $reason ) {
+			$errors->add( 'wcaf_' . $reason, $this->block_message() );
+		}
+	}
+
+	/**
+	 * Checkout-time validation (Block Checkout / Store API)
+	 *
+	 * @param WC_Order        $order
+	 * @param WP_REST_Request $request
+	 * @throws \Automattic\WooCommerce\StoreApi\Exceptions\RouteException When the checkout is refused.
+	 */
+	public function check_store_api_checkout( $order, $request ) {
+		if ( ! $order instanceof WC_Order ) {
 			return;
 		}
-		if ( ! empty( $this->options['enable_disposable'] ) && ! empty( $email ) && WCAF_Helpers::is_email_blocked( $email, $this->options ) ) {
-			$errors->add( 'wcaf_blocked_domain', $block_msg );
+		$reason = $this->pre_payment_block_reason( $order->get_billing_email(), $order->get_billing_phone(), WCAF_Helpers::get_client_ip() );
+		if ( '' === $reason ) {
 			return;
 		}
-		if ( $ip && WCAF_Helpers::is_ip_blocked( $ip, $this->options ) ) {
-			$errors->add( 'wcaf_blocked_ip', $block_msg );
-			return;
+		if ( class_exists( '\Automattic\WooCommerce\StoreApi\Exceptions\RouteException' ) ) {
+			throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException( 'wcaf_' . $reason, $this->block_message(), 403 );
 		}
-		if ( ! empty( $phone ) && WCAF_Helpers::is_phone_blocked( $phone, $this->options ) ) {
-			$errors->add( 'wcaf_blocked_phone', $block_msg );
-			return;
+	}
+
+	/**
+	 * The shared pre-payment check set, for both checkout surfaces.
+	 *
+	 * Order matters: the allowlist exempts everything, a temporary ban comes
+	 * before the merchant's lists, and the repeated-failure limit runs last
+	 * because it is the only check that can add a ban of its own.
+	 *
+	 * @param string       $email
+	 * @param string       $phone
+	 * @param string|false $ip
+	 * @return string Reason slug, or '' when nothing blocks.
+	 */
+	private function pre_payment_block_reason( $email, $phone, $ip ) {
+		$opts = $this->options;
+
+		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $opts ) ) {
+			return '';
 		}
+		if ( $ip && WCAF_IP_Bans::is_banned( $ip ) ) {
+			return 'banned_ip';
+		}
+		if ( ! empty( $email ) && WCAF_Helpers::is_email_address_blocked( $email, $opts ) ) {
+			return 'blocked_email';
+		}
+		if ( ! empty( $opts['enable_disposable'] ) && ! empty( $email ) && WCAF_Helpers::is_email_blocked( $email, $opts ) ) {
+			return 'blocked_domain';
+		}
+		if ( $ip && WCAF_Helpers::is_ip_blocked( $ip, $opts ) ) {
+			return 'blocked_ip';
+		}
+		if ( ! empty( $phone ) && WCAF_Helpers::is_phone_blocked( $phone, $opts ) ) {
+			return 'blocked_phone';
+		}
+		if ( WCAF_Decline_Clusters::is_over_block_threshold( $ip ) ) {
+			if ( $ip && WCAF_IP_Bans::maybe_auto_ban( $ip, $opts, __( 'Repeated payment failures', 'wc-antifraud' ) ) ) {
+				do_action( 'wcaf_ip_auto_banned', $ip, 'decline_limit' );
+			}
+			return 'decline_limit';
+		}
+		return '';
 	}
 
 	/**
@@ -98,9 +162,9 @@ class WCAF_Fraud_Checks {
 		if ( ! $order ) {
 			return;
 		}
-		// Skip if already marked as fraud (prevents re-processing when several of
-		// the post-payment hooks fire for the same order).
-		if ( in_array( $order->get_status(), WCAF_Order_Status::fraud_statuses(), true ) ) {
+		// Skip if already handled (prevents re-processing when several of the
+		// post-payment hooks fire for the same order).
+		if ( $this->already_handled( $order ) ) {
 			return;
 		}
 		$reasons = $this->detect_fraud_indicators( $order );
@@ -119,7 +183,7 @@ class WCAF_Fraud_Checks {
 		if ( ! $order ) {
 			return;
 		}
-		if ( in_array( $order->get_status(), WCAF_Order_Status::fraud_statuses(), true ) ) {
+		if ( $this->already_handled( $order ) ) {
 			return;
 		}
 
@@ -139,11 +203,45 @@ class WCAF_Fraud_Checks {
 		// amount and IP-repeat heuristics are deliberately NOT run here, so a genuine
 		// decline+retry can't false-positive.
 		if ( $this->is_unknown_origin_check_enabled() && $this->is_unknown_origin_order( $order ) ) {
+			$ip = self::order_ip( $order );
+			if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $this->options ) ) {
+				return;
+			}
 			$this->handle_suspicious_order(
 				$order,
 				[ __( 'Unknown Origin (no attribution / no checkout session)', 'wc-antifraud' ) ]
 			);
 		}
+	}
+
+	/**
+	 * Whether the order was already marked fraud, or already flagged in monitor mode.
+	 *
+	 * @param WC_Order $order
+	 * @return bool
+	 */
+	private function already_handled( $order ) {
+		return in_array( $order->get_status(), WCAF_Order_Status::fraud_statuses(), true )
+			|| WCAF_Order_Status::is_monitor_flagged( $order );
+	}
+
+	/**
+	 * The IP to judge an order by.
+	 *
+	 * The IP stored on the order, never the current request's. The post-payment
+	 * hooks frequently run inside a gateway webhook (Stripe, PayPal IPN) or an
+	 * admin status change, where the request IP is the gateway's server or the
+	 * admin's own address.
+	 *
+	 * @param WC_Order $order
+	 * @return string|false
+	 */
+	public static function order_ip( $order ) {
+		$ip = (string) $order->get_customer_ip_address();
+		if ( '' !== $ip && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+			return $ip;
+		}
+		return WCAF_Helpers::get_client_ip();
 	}
 
 	/**
@@ -155,6 +253,13 @@ class WCAF_Fraud_Checks {
 	private function detect_fraud_indicators( $order ) {
 		$reasons = [];
 		$opts    = $this->options;
+		$ip      = self::order_ip( $order );
+
+		// Allowlisted IPs bypass every rule (staging, headless front ends,
+		// the merchant's own testing).
+		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $opts ) ) {
+			return [];
+		}
 
 		// Store API bot detection (always on).
 		// Orders created via store-api with no WC attribution data are bots
@@ -187,13 +292,12 @@ class WCAF_Fraud_Checks {
 			$reasons[] = __( 'Blacklisted Email Address', 'wc-antifraud' );
 		}
 
-		// Blocked email domain
+		// Blocked email domain (merchant list + bundled disposable list)
 		if ( ! empty( $opts['enable_disposable'] ) && WCAF_Helpers::is_email_blocked( $order->get_billing_email(), $opts ) ) {
 			$reasons[] = __( 'Blocked Email Domain', 'wc-antifraud' );
 		}
 
 		// Blocked IP
-		$ip = WCAF_Helpers::get_client_ip();
 		if ( $ip && WCAF_Helpers::is_ip_blocked( $ip, $opts ) ) {
 			$reasons[] = __( 'Blacklisted IP Address', 'wc-antifraud' );
 		}
@@ -203,7 +307,8 @@ class WCAF_Fraud_Checks {
 			$reasons[] = __( 'Blacklisted Phone Number', 'wc-antifraud' );
 		}
 
-		// Proxy/VPN
+		// Proxy/VPN (request headers, so only meaningful when the customer's own
+		// request is the one running this analysis)
 		if ( ! empty( $opts['enable_proxy_check'] ) && WCAF_Helpers::is_proxy_detected() ) {
 			$reasons[] = __( 'Proxy/VPN Detected', 'wc-antifraud' );
 		}
@@ -248,14 +353,24 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
-	 * Mark an order as fraud, alert, and fire the extension hook.
+	 * Act on a suspicious order.
+	 *
+	 * Block mode (default): mark as fraud (status change, persistent flag,
+	 * AbuseIPDB report), alert, fire the extension hook.
+	 * Monitor mode: flag the order and note the reasons WITHOUT changing its
+	 * status or reporting the IP, alert, fire the extension hook.
 	 *
 	 * @param WC_Order $order
 	 * @param array    $reasons
 	 */
 	private function handle_suspicious_order( $order, $reasons ) {
-		WCAF_Order_Status::mark_as_fraud( $order, $reasons );
-		WCAF_Email_Alerts::send_alert( $order, $reasons, $this->options );
-		do_action( 'wcaf_suspicious_order_detected', $order, $reasons );
+		$monitor = WCAF_Helpers::is_monitor_mode( $this->options );
+		if ( $monitor ) {
+			WCAF_Order_Status::flag_for_review( $order, $reasons );
+		} else {
+			WCAF_Order_Status::mark_as_fraud( $order, $reasons );
+		}
+		WCAF_Email_Alerts::send_alert( $order, $reasons, $this->options, $monitor );
+		do_action( 'wcaf_suspicious_order_detected', $order, $reasons, $monitor );
 	}
 }

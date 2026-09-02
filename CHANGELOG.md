@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-02
+
+### Added
+- **Repeated payment failures (decline clustering).** Failed payments are counted per visitor over a rolling 24 hours, under two keys: the WooCommerce checkout session the order came from and the customer IP stored on the order. From 5 failures a non-dismissible admin notice appears on every admin screen, with a Clear link. Optionally (Detection Rules, "Refuse checkout after"), further checkouts from that visitor are refused before they reach the gateway, on both the classic checkout and the Block Checkout. Failures are counted, never orders: a trade counter placing many successful orders from one browser is not a card tester, a visitor whose cards keep declining is.
+- **Temporary auto-ban.** When the failure limit refuses a checkout, the IP can be banned for a configurable number of minutes (default 60). Bans expire on their own, never apply to allowlisted, private, or invalid IPs, are enforced at checkout, on the REST/Store API order routes, and on registration, and are listed on the Lists tab with per-IP Unban and Lift-all links.
+- **IP allowlist** (Lists tab, CIDR supported). Allowlisted IPs bypass every check, are never flagged in post-payment analysis, always pass REST hardening, are never banned, and their failed payments are not counted. For staging servers, headless front ends, and the merchant's own testing.
+- **Bundled disposable-domain list.** Disposable email blocking now ships with 8,714 known throwaway domains from the public-domain (CC0) [disposable-email-domains](https://github.com/disposable-email-domains/disposable-email-domains) project (`assets/data/disposable-domains.txt`), matched on the domain and its parent domains, plus the merchant's own additions. Before this release the rule only knew the domains typed into the settings box.
+- **Monitor mode** (Detection Rules, "Detection mode"). Suspicious orders are flagged with a persistent `_wcaf_monitor_flag` meta, get an order note with the reasons, appear in the Activity Log and with a gray "Flagged" badge on the Orders list, and trigger the alert email, but their status is never changed and their IP is never reported to AbuseIPDB. For new installs and after rule changes. Pre-payment checks are unaffected.
+- **Registration protection** (off by default). Sign-ups through the WordPress and WooCommerce registration forms are refused for banned or blacklisted IPs, for blacklisted or disposable email addresses (the latter when disposable blocking is on), and beyond a per-IP hourly limit (default 10). Allowlisted IPs skip every check.
+- **"Block this customer (Antifraud)"** in the order-screen Actions dropdown: appends the order's billing email and public customer IP to the blacklists and notes what was added.
+- **REST protection self-test** (Detection Rules, REST API Protection): one button sends a Store API checkout POST with no nonce at the store from the server and reports whether WC Antifraud's REST hardening, WooCommerce's own check, or nothing stopped it. No order is created.
+- Pre-payment checks (blacklists, bans, failure limit) now also run on the **Block Checkout** through the Store API, via `woocommerce_store_api_checkout_update_order_from_request` and a `RouteException`. Before this release the blacklists only blocked the classic checkout pre-payment; Block Checkout orders were caught post-payment.
+- New hook `wcaf_ip_auto_banned( $ip, $reason )`. `wcaf_suspicious_order_detected` gains a third argument, `$monitor` (bool).
+
+### Changed
+- Post-payment analysis now judges an order by the customer IP **stored on the order**, not by the IP of the request that happens to run the analysis. The paid-status and failed-status hooks frequently fire inside a Stripe or PayPal webhook, or an admin status change, where the request IP is the gateway's server or the admin's own address. With IP-repeat enabled that meant every webhook-confirmed order counted against the gateway's IP. The AbuseIPDB reporter already used the order IP; the fraud rules now do the same.
+- REST hardening's rejection error code is now `wcaf_rest_forbidden` (was `rest_forbidden`), so the self-test and log readers can tell it apart from core's.
+- The "Blacklists" tab is now "Lists" (it holds the allowlist, the blacklists, and the active bans). The IP repeat-order rule's description now says plainly that it counts successful orders too and points at the failure rule as the better card-testing signal.
+- Fraud alert emails include the customer IP.
+
 ## [1.5.1] - 2026-08-17
 
 ### Fixed

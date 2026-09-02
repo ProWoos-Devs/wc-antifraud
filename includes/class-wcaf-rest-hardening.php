@@ -13,6 +13,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WCAF_REST_Hardening {
 
+	/**
+	 * Error code returned when this class refuses a request. The settings
+	 * self-test looks for it to tell this plugin's rejection apart from
+	 * WooCommerce's own nonce check.
+	 */
+	const ERROR_CODE = 'wcaf_rest_forbidden';
+
 	public static function init() {
 		$opts = WCAF_Helpers::get_options();
 		if ( empty( $opts['enable_rest_hardening'] ) ) {
@@ -54,6 +61,20 @@ class WCAF_REST_Hardening {
 			return $result;
 		}
 
+		$opts = WCAF_Helpers::get_options();
+		$ip   = WCAF_Helpers::get_client_ip();
+
+		// Allowlisted IPs (headless front ends, staging) bypass everything.
+		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $opts ) ) {
+			return $result;
+		}
+
+		// Temporarily banned IPs get nothing, whatever credentials they carry.
+		if ( $ip && WCAF_IP_Bans::is_banned( $ip ) ) {
+			error_log( sprintf( 'WC Antifraud: Blocked REST API order creation from banned IP. Route: %s, IP: %s', $route, $ip ) );
+			return new WP_Error( self::ERROR_CODE, __( 'Order creation via REST API is not permitted.', 'wc-antifraud' ), [ 'status' => 403 ] );
+		}
+
 		// Allow authenticated admin users
 		if ( current_user_can( 'manage_woocommerce' ) ) {
 			return $result;
@@ -81,9 +102,8 @@ class WCAF_REST_Hardening {
 			return $result;
 		}
 
-		$ip = WCAF_Helpers::get_client_ip();
 		error_log( sprintf( 'WC Antifraud: Blocked REST API order creation. Route: %s, IP: %s', $route, $ip ?: 'unknown' ) );
 
-		return new WP_Error( 'rest_forbidden', __( 'Order creation via REST API is not permitted.', 'wc-antifraud' ), [ 'status' => 403 ] );
+		return new WP_Error( self::ERROR_CODE, __( 'Order creation via REST API is not permitted.', 'wc-antifraud' ), [ 'status' => 403 ] );
 	}
 }

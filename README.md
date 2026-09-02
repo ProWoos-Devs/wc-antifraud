@@ -1,47 +1,55 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.5.1-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.6.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
 [![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-green.svg)](https://www.gnu.org/licenses/gpl-2.0.html)
 
-**Multi-layer anti-fraud protection for WooCommerce.** Origin verification, blacklists (email, IP, phone), suspicious amount detection, rate limiting, REST API hardening, and automated fraud management with email alerts.
+**Multi-layer anti-fraud protection for WooCommerce.** Origin verification, repeated-payment-failure detection with optional pre-payment blocking and auto-ban, blacklists and allowlist (email, IP, phone), a bundled disposable-email list, REST API hardening, registration protection, and automated fraud management with a monitor mode and email alerts.
 
-> **Current Version: 1.5.1** | **Released: August 17, 2026**
+> **Current Version: 1.6.0** | **Released: September 2, 2026**
 
 ## Features
 
 ### Detection Rules
+- **Detection mode** - Block (cancel suspicious orders) or Monitor (flag, note, and alert without touching the order status; nothing is reported to AbuseIPDB)
 - **Unknown origin detection** - flag orders placed outside the standard checkout flow
-- **Suspicious amount detection** - configurable threshold for unusually high order totals
-- **Free email provider detection** - flag orders using disposable/free email domains
+- **Repeated payment failures** - failed payments are counted per visitor (checkout session and IP) over a rolling 24 hours; from 5 failures an admin notice appears, and an optional limit refuses further checkouts from that visitor before they reach the gateway, on the classic and the Block Checkout alike
+- **Auto-ban** - when the failure limit refuses a checkout, the IP can be banned for a configurable time; bans expire on their own and never touch allowlisted IPs
+- **Suspicious amount detection** - flag orders matching a known fraudulent amount
+- **Disposable email detection** - bundled list of 8,714 throwaway domains (public-domain disposable-email-domains project) plus your own additions
 - **IP repeat order detection** - track and flag multiple orders from the same IP
 - **Proxy/VPN detection** - identify orders placed through anonymizing services
+- **Registration protection** - refuse sign-ups from banned or blacklisted IPs and disposable or blacklisted emails, with a per-IP hourly limit
 
-### Blacklists
-- **Email blacklist** - block specific email addresses or patterns
+### Lists
+- **IP allowlist** - CIDR supported; bypasses every check, never flagged, never banned
+- **Email blacklist** - block specific email addresses
 - **IP blacklist** - block IPs with CIDR notation support
 - **Phone blacklist** - block phone numbers with wildcard support
+- **Temporary bans** - active auto-bans listed with Unban and Lift-all links
+- **"Block this customer"** - order-screen action that adds the order's email and IP to the blacklists
 
 ### Checkout Protection
-- Block blacklisted emails, IPs, and phones at checkout time
+- Blacklists, bans, and the failure limit are enforced pre-payment on both the classic checkout and the Block Checkout (Store API)
 - Customizable block message via `wcaf_checkout_block_message` filter
 
 ### REST API Hardening
 - Block unauthenticated order creation via WC REST API and Store API
+- One-click self-test that fires a nonce-less Store API checkout POST at the store and reports who stopped it
 
 ### Automated Fraud Management
 - Custom order statuses: "Auto Cancelled" (plugin detections) and "Cancelled by Stripe" (gateway fraud verdicts)
-- Single "Fraud" view on the Orders list gathering every fraud order from both statuses, plus any that a refund has since relabelled Refunded
+- Single "Fraud" view on the Orders list gathering every fraud order from both statuses, plus any that a refund has since relabelled Refunded; monitor-mode detections show a gray "Flagged" badge
 - Stripe decline intelligence - failed Stripe payments get the real decline reason (Radar block, risk level, decline code, card) as an order note, order meta, and a panel on the order screen with a direct Stripe Dashboard link; Radar-blocked / issuer-fraud-declined orders are auto-marked as fraud (no AbuseIPDB reporting for gateway verdicts)
 - Email alerts with order details and fraud indicators
 - AbuseIPDB reporting - opt-in reporting of fraud-order IPs to the [AbuseIPDB](https://www.abuseipdb.com/) community database (categories: Fraud Orders + Web App Attack), no customer PII ever included
-- `wcaf_suspicious_order_detected` action hook for extensibility
+- `wcaf_suspicious_order_detected` and `wcaf_ip_auto_banned` action hooks for extensibility
 
 ### Settings & Reporting
-- Tabbed settings UI: Detection Rules, Blacklists, Notifications, Activity Log, Reports
-- Activity log with filterable order history
+- Tabbed settings UI: Detection Rules, Lists, Notifications, Activity Log, Reports
+- Activity log of cancelled and monitor-flagged orders
 - Reports dashboard with fraud summary counts and top offenders
 
 ## Requirements
@@ -54,7 +62,7 @@
 
 1. Upload the `wc-antifraud` folder to `/wp-content/plugins/`
 2. Activate the plugin through the WordPress Plugins menu
-3. Go to **WooCommerce > Settings > Antifraud** to configure
+3. Go to the **Antifraud** menu in wp-admin to configure. On a new store, start in Monitor mode and switch to Block once the Activity Log shows only real fraud.
 
 ## Development
 

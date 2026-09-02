@@ -50,12 +50,15 @@ class WC_Antifraud {
 		$dir = WCAF_PLUGIN_DIR . 'includes/';
 		require_once $dir . 'class-wcaf-helpers.php';
 		require_once $dir . 'class-wcaf-ip-tracker.php';
+		require_once $dir . 'class-wcaf-ip-bans.php';
+		require_once $dir . 'class-wcaf-decline-clusters.php';
 		require_once $dir . 'class-wcaf-email-alerts.php';
 		require_once $dir . 'class-wcaf-abuseipdb.php';
 		require_once $dir . 'class-wcaf-order-status.php';
 		require_once $dir . 'class-wcaf-fraud-checks.php';
 		require_once $dir . 'class-wcaf-stripe-decline.php';
 		require_once $dir . 'class-wcaf-rest-hardening.php';
+		require_once $dir . 'class-wcaf-registration.php';
 		require_once $dir . 'class-wcaf-settings.php';
 		require_once $dir . 'class-wcaf-github-updater.php';
 	}
@@ -104,6 +107,13 @@ class WC_Antifraud {
 		WCAF_Stripe_Decline::init();
 
 		WCAF_REST_Hardening::init();
+
+		// Count failed payments per visitor (feeds the admin notice, the optional
+		// checkout block, and auto-ban).
+		WCAF_Decline_Clusters::init();
+
+		// Registration form protection (no-op unless enabled).
+		WCAF_Registration::init();
 	}
 
 	/**
@@ -132,23 +142,30 @@ class WC_Antifraud {
 	 */
 	public static function get_default_options() {
 		return [
-			'target_amount'         => 0,
-			'amount_tolerance'      => 0.01,
-			'email_recipients'      => get_option( 'admin_email' ),
-			'enable_unknown_origin' => 1,
-			'enable_stripe_decline' => 1,
-			'enable_disposable'     => 0,
-			'disposable_domains'    => '',
-			'enable_proxy_check'    => 0,
-			'enable_ip_repeat'      => 0,
-			'ip_repeat_threshold'   => 3,
-			'ip_repeat_window'      => 3600,
-			'enable_rest_hardening' => 1,
-			'enable_abuseipdb'      => 0,
-			'abuseipdb_api_key'     => '',
-			'blocked_emails'        => '',
-			'blocked_ips'           => '',
-			'blocked_phones'        => '',
+			'detection_mode'            => 'block',
+			'target_amount'             => 0,
+			'amount_tolerance'          => 0.01,
+			'email_recipients'          => get_option( 'admin_email' ),
+			'enable_unknown_origin'     => 1,
+			'enable_stripe_decline'     => 1,
+			'enable_disposable'         => 0,
+			'disposable_domains'        => '',
+			'enable_proxy_check'        => 0,
+			'enable_ip_repeat'          => 0,
+			'ip_repeat_threshold'       => 3,
+			'ip_repeat_window'          => 3600,
+			'decline_block_threshold'   => 0,
+			'enable_auto_ban'           => 0,
+			'auto_ban_minutes'          => 60,
+			'enable_registration_limit' => 0,
+			'registration_max_per_hour' => 10,
+			'enable_rest_hardening'     => 1,
+			'enable_abuseipdb'          => 0,
+			'abuseipdb_api_key'         => '',
+			'allowed_ips'               => '',
+			'blocked_emails'            => '',
+			'blocked_ips'               => '',
+			'blocked_phones'            => '',
 		];
 	}
 }

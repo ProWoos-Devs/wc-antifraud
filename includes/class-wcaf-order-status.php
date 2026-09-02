@@ -64,6 +64,17 @@ class WCAF_Order_Status {
 	 */
 	const FRAUD_FLAG_META = '_wcaf_is_fraud';
 
+	/**
+	 * Order meta set in monitor mode: the order matched a fraud rule and was
+	 * flagged for review, but its status was left alone.
+	 */
+	const MONITOR_FLAG_META = '_wcaf_monitor_flag';
+
+	/**
+	 * Key of the "Block this customer" entry in the order-screen Actions dropdown.
+	 */
+	const BLOCK_ACTION = 'wcaf_block_customer';
+
 	public static function init() {
 		self::register_status();
 		add_filter( 'wc_order_statuses', [ __CLASS__, 'add_status_to_list' ] );
@@ -88,6 +99,101 @@ class WCAF_Order_Status {
 		add_action( 'manage_shop_order_posts_custom_column', [ __CLASS__, 'render_fraud_column_classic' ], 10, 2 );
 		add_filter( 'woocommerce_shop_order_list_table_columns', [ __CLASS__, 'add_fraud_column' ] );
 		add_action( 'woocommerce_shop_order_list_table_custom_column', [ __CLASS__, 'render_fraud_column_hpos' ], 10, 2 );
+
+		// "Block this customer" in the order-screen Actions dropdown.
+		add_filter( 'woocommerce_order_actions', [ __CLASS__, 'register_order_action' ], 10, 2 );
+		add_action( 'woocommerce_order_action_' . self::BLOCK_ACTION, [ __CLASS__, 'handle_block_customer' ] );
+	}
+
+	/**
+	 * Flag an order for review without changing its status (monitor mode).
+	 *
+	 * @param WC_Order $order
+	 * @param array    $reasons
+	 * @return bool
+	 */
+	public static function flag_for_review( $order, $reasons ) {
+		if ( ! $order ) {
+			return false;
+		}
+		$order->update_meta_data( self::MONITOR_FLAG_META, 'yes' );
+		$order->save();
+		$order->add_order_note(
+			sprintf(
+				/* translators: %s: comma-separated reasons */
+				__( 'Flagged for review by WC Antifraud (monitor mode, status unchanged). Reasons: %s', 'wc-antifraud' ),
+				implode( ', ', $reasons )
+			)
+		);
+		return true;
+	}
+
+	/**
+	 * Whether an order was flagged in monitor mode.
+	 *
+	 * @param WC_Order $order
+	 * @return bool
+	 */
+	public static function is_monitor_flagged( $order ) {
+		return $order && 'yes' === $order->get_meta( self::MONITOR_FLAG_META );
+	}
+
+	/**
+	 * Add "Block this customer" to the order Actions dropdown.
+	 *
+	 * @param array         $actions
+	 * @param WC_Order|null $order
+	 * @return array
+	 */
+	public static function register_order_action( $actions, $order = null ) {
+		$actions[ self::BLOCK_ACTION ] = __( 'Block this customer (Antifraud)', 'wc-antifraud' );
+		return $actions;
+	}
+
+	/**
+	 * Append the order's billing email and customer IP to the blacklists.
+	 *
+	 * WooCommerce verifies the order-actions nonce and capability before this
+	 * runs. The IP is only added when it is a public address, so a store owner
+	 * testing from a private network cannot lock out their own LAN.
+	 *
+	 * @param WC_Order $order
+	 */
+	public static function handle_block_customer( $order ) {
+		if ( ! $order instanceof WC_Order ) {
+			return;
+		}
+		$opts  = WCAF_Helpers::get_options();
+		$added = [];
+
+		$email = strtolower( trim( (string) $order->get_billing_email() ) );
+		if ( $email && is_email( $email ) && ! WCAF_Helpers::is_email_address_blocked( $email, $opts ) ) {
+			$opts['blocked_emails'] = trim( (string) $opts['blocked_emails'] . "\n" . $email );
+			$added[]                = $email;
+		}
+
+		$ip = (string) $order->get_customer_ip_address();
+		if ( $ip
+			&& false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE )
+			&& ! WCAF_Helpers::is_ip_blocked( $ip, $opts )
+			&& ! WCAF_Helpers::is_ip_allowed( $ip, $opts ) ) {
+			$opts['blocked_ips'] = trim( (string) $opts['blocked_ips'] . "\n" . $ip );
+			$added[]             = $ip;
+		}
+
+		if ( empty( $added ) ) {
+			$order->add_order_note( __( 'WC Antifraud: this customer\'s email and IP were already on the blacklists (or not blockable).', 'wc-antifraud' ) );
+			return;
+		}
+
+		update_option( WC_Antifraud::OPTION_KEY, $opts );
+		$order->add_order_note(
+			sprintf(
+				/* translators: %s: comma-separated list of what was added */
+				__( 'WC Antifraud: customer blocked. Added to the blacklists: %s', 'wc-antifraud' ),
+				implode( ', ', $added )
+			)
+		);
 	}
 
 	/**
@@ -471,6 +577,14 @@ class WCAF_Order_Status {
 	 */
 	private static function output_fraud_badge( $order ) {
 		if ( ! self::is_fraud_order( $order ) ) {
+			// Monitor-mode flag: gray, so it reads as "look at this", not "fraud".
+			if ( self::is_monitor_flagged( $order ) ) {
+				printf(
+					'<mark class="order-status" style="background:#646970;color:#fff;" title="%s"><span>%s</span></mark>',
+					esc_attr__( 'Matched a fraud rule in monitor mode. Status unchanged.', 'wc-antifraud' ),
+					esc_html__( 'Flagged', 'wc-antifraud' )
+				);
+			}
 			return;
 		}
 
