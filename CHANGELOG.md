@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-02
+
+### Fixed
+- **Client IP resolution no longer trusts forwarding headers from anyone.** Before this release the plugin read `CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`, or `Client-IP` from any request, so a bot could invent a fresh address per request to evade the IP blacklist and bans, get innocent addresses auto-banned, and feed fake diversity into the repeated-failure counters. Now the connecting address is the customer unless it belongs to a proxy the plugin trusts: Cloudflare (published ranges fetched daily by WP cron into `wcaf_cloudflare_ips`, with a bundled copy in `assets/data/cloudflare-ips.txt` as the fallback), a proxy on the same host (a private, link-local, loopback, or carrier-grade NAT connecting address cannot be an internet client, so the rightmost public `X-Forwarded-For` entry, then `X-Real-IP`, is the customer), or a proxy declared under Lists > Trusted Proxies. Managed hosts that front PHP with their own nginx or load balancer need no configuration.
+
+### Added
+- Lists > Trusted Proxies: declared proxy addresses (IPv4 and IPv6, CIDR), a diagnostic showing how the current request was resolved and by which rule, the Cloudflare range status with a Refresh link, and a clearly marked legacy switch that restores the old trust-everything behavior for a host with a public-address proxy the owner cannot yet identify.
+- Detection of an undeclared public-address proxy: when admin requests keep arriving from one public address that carries a forwarding header naming another address, a notice offers one click to trust it or to dismiss it for 30 days. While it stays undeclared, the automatic IP-keyed rules (auto-ban, the repeated-failure IP key, the registration rate limit, IP repeat) are paused, because every customer would otherwise look like that one address and the first trip would lock all of them out. The explicit IP blacklist and allowlist, and every rule not keyed by IP, keep working throughout.
+- IPv6 support in every IP list: allowlist, blacklist, trusted proxies, and CIDR matching (`WCAF_Helpers::ip_in_cidr()`).
+
+### Changed
+- The order's stored customer IP, which the post-payment rules and AbuseIPDB reporting use, still comes from WooCommerce's own resolution (`WC_Geolocation::get_ip_address()`), which trusts forwarding headers unconditionally. That is WooCommerce's behavior, not this plugin's, and is unchanged.
+
 ## [1.6.0] - 2026-09-02
 
 ### Added

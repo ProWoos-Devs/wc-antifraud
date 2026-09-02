@@ -88,7 +88,7 @@ class WCAF_Registration {
 			return $errors;
 		}
 
-		if ( $ip && self::over_rate_limit( $ip, (int) ( $opts['registration_max_per_hour'] ?? 10 ) ) ) {
+		if ( $ip && ! WCAF_Client_IP::ip_rules_suspended() && self::over_rate_limit( $ip, (int) ( $opts['registration_max_per_hour'] ?? 10 ) ) ) {
 			$errors->add( 'wcaf_registration_rate', $message );
 		}
 

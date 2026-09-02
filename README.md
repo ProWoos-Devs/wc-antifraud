@@ -1,6 +1,6 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.6.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.7.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
@@ -8,7 +8,7 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, repeated-payment-failure detection with optional pre-payment blocking and auto-ban, blacklists and allowlist (email, IP, phone), a bundled disposable-email list, REST API hardening, registration protection, and automated fraud management with a monitor mode and email alerts.
 
-> **Current Version: 1.6.0** | **Released: September 2, 2026**
+> **Current Version: 1.7.0** | **Released: September 2, 2026**
 
 ## Features
 
@@ -24,9 +24,10 @@
 - **Registration protection** - refuse sign-ups from banned or blacklisted IPs and disposable or blacklisted emails, with a per-IP hourly limit
 
 ### Lists
-- **IP allowlist** - CIDR supported; bypasses every check, never flagged, never banned
+- **IP allowlist** - CIDR supported, IPv4 and IPv6; bypasses every check, never flagged, never banned
+- **Trusted proxies** - the customer address is the connecting address unless it comes through Cloudflare (ranges refreshed daily), a proxy on the same host (detected automatically), or a proxy you declare; forwarding headers from anyone else are ignored, so a bot cannot forge its address. An undeclared public proxy is detected and offered for one-click trust
 - **Email blacklist** - block specific email addresses
-- **IP blacklist** - block IPs with CIDR notation support
+- **IP blacklist** - block IPs with CIDR notation support, IPv4 and IPv6
 - **Phone blacklist** - block phone numbers with wildcard support
 - **Temporary bans** - active auto-bans listed with Unban and Lift-all links
 - **"Block this customer"** - order-screen action that adds the order's email and IP to the blacklists

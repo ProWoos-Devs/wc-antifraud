@@ -49,6 +49,7 @@ class WC_Antifraud {
 	private function load_dependencies() {
 		$dir = WCAF_PLUGIN_DIR . 'includes/';
 		require_once $dir . 'class-wcaf-helpers.php';
+		require_once $dir . 'class-wcaf-client-ip.php';
 		require_once $dir . 'class-wcaf-ip-tracker.php';
 		require_once $dir . 'class-wcaf-ip-bans.php';
 		require_once $dir . 'class-wcaf-decline-clusters.php';
@@ -100,6 +101,10 @@ class WC_Antifraud {
 			return;
 		}
 
+		// Trusted-proxy IP resolution: cron refresh of Cloudflare ranges and
+		// detection of an undeclared public-address proxy (admin only).
+		WCAF_Client_IP::init();
+
 		new WCAF_Fraud_Checks();
 
 		// Record Stripe decline detail on failed orders (no-op if the Stripe
@@ -124,6 +129,8 @@ class WC_Antifraud {
 		$existing = get_option( self::OPTION_KEY, [] );
 		update_option( self::OPTION_KEY, wp_parse_args( $existing, $defaults ) );
 		WCAF_IP_Tracker::initialize();
+		WCAF_Client_IP::ensure_cron();
+		WCAF_Client_IP::refresh_cloudflare_ranges();
 		flush_rewrite_rules();
 	}
 
@@ -132,6 +139,7 @@ class WC_Antifraud {
 	 */
 	public function deactivate() {
 		WCAF_IP_Tracker::cleanup_old_data();
+		WCAF_Client_IP::unschedule();
 		flush_rewrite_rules();
 	}
 
@@ -163,6 +171,8 @@ class WC_Antifraud {
 			'enable_abuseipdb'          => 0,
 			'abuseipdb_api_key'         => '',
 			'allowed_ips'               => '',
+			'trusted_proxies'           => '',
+			'trust_all_proxy_headers'   => 0,
 			'blocked_emails'            => '',
 			'blocked_ips'               => '',
 			'blocked_phones'            => '',

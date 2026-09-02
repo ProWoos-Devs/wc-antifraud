@@ -22,6 +22,7 @@ class WCAF_Settings {
 		add_action( 'admin_init', [ __CLASS__, 'register_settings' ] );
 		add_action( 'admin_init', [ __CLASS__, 'handle_admin_actions' ] );
 		add_action( 'admin_notices', [ __CLASS__, 'action_admin_notice' ] );
+		add_action( 'admin_notices', [ __CLASS__, 'proxy_suspect_notice' ] );
 		add_filter( 'plugin_action_links_' . WCAF_PLUGIN_BASENAME, [ __CLASS__, 'add_action_links' ] );
 		add_action( 'admin_enqueue_scripts', [ __CLASS__, 'enqueue_assets' ] );
 		add_action( 'wp_ajax_wcaf_self_test', [ __CLASS__, 'ajax_self_test' ] );
@@ -148,6 +149,13 @@ class WCAF_Settings {
 		}, 'wc-antifraud' );
 		add_settings_field( 'allowed_ips', __( 'Allowed IP addresses', 'wc-antifraud' ), [ __CLASS__, 'field_allowed_ips' ], 'wc-antifraud', 'wcaf_allow' );
 
+		add_settings_section( 'wcaf_proxies', __( 'Trusted Proxies', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'How the plugin decides which address is the customer. The connecting address is the customer unless it belongs to a proxy the plugin trusts: Cloudflare (ranges refreshed daily), a proxy on this host (private address, detected automatically), or a proxy you declare below. Forwarding headers from anyone else are ignored, because any client can type them.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud' );
+		add_settings_field( 'trusted_proxies', __( 'Trusted proxy addresses', 'wc-antifraud' ), [ __CLASS__, 'field_trusted_proxies' ], 'wc-antifraud', 'wcaf_proxies' );
+		add_settings_field( 'trust_all_proxy_headers', __( 'Legacy mode', 'wc-antifraud' ), [ __CLASS__, 'field_trust_all_proxy_headers' ], 'wc-antifraud', 'wcaf_proxies' );
+		add_settings_field( 'proxy_diagnostic', __( 'This request', 'wc-antifraud' ), [ __CLASS__, 'field_proxy_diagnostic' ], 'wc-antifraud', 'wcaf_proxies' );
+
 		add_settings_section( 'wcaf_bl', __( 'Blacklists', 'wc-antifraud' ), function () {
 			echo '<p>' . esc_html__( 'Manually block specific emails, IPs, or phone numbers. One entry per line. On the order screen, the Actions dropdown has "Block this customer", which adds the order\'s email and IP here.', 'wc-antifraud' ) . '</p>';
 		}, 'wc-antifraud' );
@@ -222,6 +230,11 @@ class WCAF_Settings {
 			$output['enable_disposable']  = ! empty( $input['enable_disposable'] ) ? 1 : 0;
 			$output['disposable_domains'] = isset( $input['disposable_domains'] ) ? sanitize_textarea_field( $input['disposable_domains'] ) : '';
 			$output['allowed_ips']        = isset( $input['allowed_ips'] ) ? sanitize_textarea_field( $input['allowed_ips'] ) : '';
+			$output['trusted_proxies']    = isset( $input['trusted_proxies'] ) ? sanitize_textarea_field( $input['trusted_proxies'] ) : '';
+			$output['trust_all_proxy_headers'] = ! empty( $input['trust_all_proxy_headers'] ) ? 1 : 0;
+			if ( $output['trust_all_proxy_headers'] ) {
+				add_settings_error( 'trust_all_proxy_headers', 'legacy_proxy_mode', __( 'Legacy mode is on: forwarding headers from any client are trusted, so IP-based rules can be evaded or misdirected by a bot that forges them. Declare your proxy instead and turn this off.', 'wc-antifraud' ), 'warning' );
+			}
 			$output['blocked_emails']     = isset( $input['blocked_emails'] ) ? sanitize_textarea_field( $input['blocked_emails'] ) : '';
 			$output['blocked_ips']        = isset( $input['blocked_ips'] ) ? sanitize_textarea_field( $input['blocked_ips'] ) : '';
 			$output['blocked_phones']     = isset( $input['blocked_phones'] ) ? sanitize_textarea_field( $input['blocked_phones'] ) : '';
@@ -270,6 +283,14 @@ class WCAF_Settings {
 		} elseif ( 'reset_declines' === $action ) {
 			WCAF_Decline_Clusters::reset();
 			$notice = 'declines_reset';
+		} elseif ( 'trust_proxy' === $action ) {
+			WCAF_Client_IP::trust_suspect();
+			$notice = 'proxy_trusted';
+		} elseif ( 'dismiss_proxy' === $action ) {
+			WCAF_Client_IP::dismiss_suspect();
+			$notice = 'proxy_dismissed';
+		} elseif ( 'refresh_cf' === $action ) {
+			$notice = WCAF_Client_IP::refresh_cloudflare_ranges() ? 'cf_refreshed' : 'cf_refresh_failed';
 		}
 
 		$redirect = remove_query_arg( [ 'wcaf_action', 'ip', '_wpnonce' ] );
@@ -288,11 +309,46 @@ class WCAF_Settings {
 			'unbanned'       => __( 'The ban was lifted.', 'wc-antifraud' ),
 			'bans_cleared'   => __( 'All temporary bans were lifted.', 'wc-antifraud' ),
 			'declines_reset' => __( 'The repeated-failure counters were cleared.', 'wc-antifraud' ),
+			'proxy_trusted'  => __( 'The proxy was added to Trusted proxy addresses. IP-based rules now see your customers\' real addresses.', 'wc-antifraud' ),
+			'proxy_dismissed' => __( 'Noted. That address will not be reported as a proxy for 30 days.', 'wc-antifraud' ),
+			'cf_refreshed'   => __( 'Cloudflare IP ranges refreshed.', 'wc-antifraud' ),
+			'cf_refresh_failed' => __( 'Cloudflare IP ranges could not be fetched; the previous set is still in use.', 'wc-antifraud' ),
 		];
 		if ( ! isset( $messages[ $key ] ) ) {
 			return;
 		}
-		printf( '<div class="notice notice-success is-dismissible"><p>%s</p></div>', esc_html( $messages[ $key ] ) );
+		$type = 'cf_refresh_failed' === $key ? 'warning' : 'success';
+		printf( '<div class="notice notice-%s is-dismissible"><p>%s</p></div>', esc_attr( $type ), esc_html( $messages[ $key ] ) );
+	}
+
+	/**
+	 * Persistent notice while an undeclared public-address proxy is suspected
+	 * and the automatic IP rules are suspended because of it.
+	 */
+	public static function proxy_suspect_notice() {
+		if ( ! current_user_can( 'manage_woocommerce' ) || ! WCAF_Client_IP::ip_rules_suspended() ) {
+			return;
+		}
+		$s = WCAF_Client_IP::suspect();
+		if ( null === $s ) {
+			return;
+		}
+		$trust   = wp_nonce_url( admin_url( 'admin.php?page=wc-antifraud&tab=blacklists&wcaf_action=trust_proxy' ), self::ACTION_NONCE );
+		$dismiss = wp_nonce_url( admin_url( 'admin.php?page=wc-antifraud&tab=blacklists&wcaf_action=dismiss_proxy' ), self::ACTION_NONCE );
+		printf(
+			'<div class="notice notice-warning"><p><strong>%s</strong> %s</p><p><a class="button button-primary" href="%s">%s</a> <a class="button" href="%s">%s</a></p></div>',
+			esc_html__( 'WC Antifraud: a proxy seems to sit in front of this site.', 'wc-antifraud' ),
+			esc_html( sprintf(
+				/* translators: 1: proxy address, 2: forwarded address */
+				__( 'Requests keep arriving from %1$s with a forwarding header naming another address (last seen: %2$s). Until you confirm that %1$s is your proxy, the automatic IP rules (auto-ban, repeated-failure IP counting, registration rate limit, IP repeat) are paused, because every customer would otherwise look like that one address. Everything else keeps working.', 'wc-antifraud' ),
+				$s['ip'],
+				$s['forwarded']
+			) ),
+			esc_url( $trust ),
+			esc_html( sprintf( __( 'Yes, %s is my proxy', 'wc-antifraud' ), $s['ip'] ) ),
+			esc_url( $dismiss ),
+			esc_html__( 'No, that is not a proxy', 'wc-antifraud' )
+		);
 	}
 
 	// ── Self-test (REST hardening) ────────────────────────────────────
@@ -700,6 +756,9 @@ class WCAF_Settings {
 			esc_html__( 'Temporarily ban the IP once the failure limit above refuses a checkout', 'wc-antifraud' ),
 			esc_html__( 'Stops the same source from simply starting a fresh session and carrying on. The ban lifts itself after the duration below, so a wrong guess never becomes a permanent lock-out. Allowlisted IPs are never banned. Active bans are listed on the Lists tab.', 'wc-antifraud' )
 		);
+		if ( WCAF_Client_IP::ip_rules_suspended() ) {
+			printf( '<p class="description" style="color:#b32d2e;font-weight:600;">%s</p>', esc_html__( 'Paused: an undeclared proxy is suspected (see the notice at the top of the screen, or Lists > Trusted Proxies).', 'wc-antifraud' ) );
+		}
 	}
 
 	public static function field_auto_ban_minutes() {
@@ -733,6 +792,9 @@ class WCAF_Settings {
 			esc_html__( 'Flag repeat orders from the same IP', 'wc-antifraud' ),
 			esc_html__( 'Counts every order from an IP, successful ones included, so a trade counter or phone-order desk placing many orders from one connection will trip it. For card testing, the Repeated Payment Failures rule above is the better signal.', 'wc-antifraud' )
 		);
+		if ( WCAF_Client_IP::ip_rules_suspended() ) {
+			printf( '<p class="description" style="color:#b32d2e;font-weight:600;">%s</p>', esc_html__( 'Paused: an undeclared proxy is suspected (see the notice at the top of the screen, or Lists > Trusted Proxies).', 'wc-antifraud' ) );
+		}
 	}
 
 	public static function field_ip_threshold() {
@@ -759,6 +821,9 @@ class WCAF_Settings {
 			esc_html__( 'Refuse sign-ups from banned or blacklisted IPs, from blacklisted or disposable email addresses, and beyond a per-IP hourly limit', 'wc-antifraud' ),
 			esc_html__( 'Disposable addresses are refused only when disposable email blocking is on (Lists tab). The hourly limit is deliberately generous so a shared office, campus, or carrier-grade NAT address is not tripped by ordinary use. Allowlisted IPs skip every check.', 'wc-antifraud' )
 		);
+		if ( WCAF_Client_IP::ip_rules_suspended() ) {
+			printf( '<p class="description" style="color:#b32d2e;font-weight:600;">%s</p>', esc_html__( 'Paused: an undeclared proxy is suspected (see the notice at the top of the screen, or Lists > Trusted Proxies).', 'wc-antifraud' ) );
+		}
 	}
 
 	public static function field_registration_max() {
@@ -793,6 +858,58 @@ class WCAF_Settings {
 			esc_html__( 'Run the test', 'wc-antifraud' ),
 			esc_html__( 'Sends the same request a card-testing bot sends, a Store API checkout POST that never loaded your checkout page, at this store from the server, and reports who stopped it. Nothing is charged and no order is created. Uses the saved settings, so save first after changing the toggle above.', 'wc-antifraud' )
 		);
+	}
+
+	public static function field_trusted_proxies() {
+		$o = self::opt();
+		printf( '<textarea name="%s[trusted_proxies]" rows="3" cols="60" class="large-text code">%s</textarea><p class="description">%s</p>',
+			esc_attr( self::key() ), esc_textarea( $o['trusted_proxies'] ),
+			esc_html__( 'Only needed for a proxy with a public address that is not Cloudflare (an external load balancer, another CDN). One IP or CIDR per line, IPv4 or IPv6. Proxies on this host (private addresses) are trusted automatically.', 'wc-antifraud' )
+		);
+		$fetched = WCAF_Client_IP::cloudflare_ranges_fetched_at();
+		$count   = count( WCAF_Client_IP::cloudflare_ranges() );
+		$status  = $fetched
+			? sprintf( /* translators: 1: number of ranges, 2: date */ __( 'Cloudflare ranges: %1$d, fetched %2$s.', 'wc-antifraud' ), $count, date_i18n( 'M j, Y g:i a', $fetched ) )
+			: sprintf( /* translators: %d: number of ranges */ __( 'Cloudflare ranges: %d from the bundled copy (no fetch has succeeded yet).', 'wc-antifraud' ), $count );
+		printf(
+			'<p class="description">%s <a href="%s">%s</a></p>',
+			esc_html( $status ),
+			esc_url( wp_nonce_url( admin_url( 'admin.php?page=wc-antifraud&tab=blacklists&wcaf_action=refresh_cf' ), self::ACTION_NONCE ) ),
+			esc_html__( 'Refresh now', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_trust_all_proxy_headers() {
+		$o = self::opt();
+		printf( '<label><input name="%s[trust_all_proxy_headers]" type="checkbox" value="1" %s /> %s</label><p class="description" style="color:#b32d2e;">%s</p>',
+			esc_attr( self::key() ), checked( 1, $o['trust_all_proxy_headers'], false ),
+			esc_html__( 'Trust forwarding headers from any client (insecure, behavior before 1.7.0)', 'wc-antifraud' ),
+			esc_html__( 'Lets a bot forge its address, which evades the IP blacklist and bans and can get innocent addresses banned. Use only while you identify a proxy you cannot yet declare, then turn it off.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_proxy_diagnostic() {
+		$remote   = isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : '';
+		$resolved = WCAF_Helpers::get_client_ip();
+		$labels   = [
+			'direct'               => __( 'direct connection, no proxy', 'wc-antifraud' ),
+			'cloudflare'           => __( 'behind Cloudflare, client taken from CF-Connecting-IP', 'wc-antifraud' ),
+			'cloudflare-forwarded' => __( 'behind Cloudflare, client taken from X-Forwarded-For', 'wc-antifraud' ),
+			'local-proxy'          => __( 'proxy on this host, client taken from X-Forwarded-For', 'wc-antifraud' ),
+			'trusted-proxy'        => __( 'declared proxy, client taken from X-Forwarded-For', 'wc-antifraud' ),
+			'legacy'               => __( 'legacy mode, first forwarding header trusted', 'wc-antifraud' ),
+			'none'                 => __( 'no address available', 'wc-antifraud' ),
+		];
+		$source = WCAF_Client_IP::source();
+		printf(
+			'<p><code>%s</code> &rarr; <code>%s</code><br /><span class="description">%s</span></p>',
+			esc_html( $remote ?: '-' ),
+			esc_html( $resolved ?: '-' ),
+			esc_html( $labels[ $source ] ?? $source )
+		);
+		if ( WCAF_Client_IP::ip_rules_suspended() ) {
+			printf( '<p class="description" style="color:#b32d2e;font-weight:600;">%s</p>', esc_html__( 'Automatic IP rules are paused: an undeclared proxy is suspected. See the notice at the top of the screen.', 'wc-antifraud' ) );
+		}
 	}
 
 	public static function field_allowed_ips() {

@@ -12,32 +12,71 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WCAF_Helpers {
 
 	/**
-	 * Get client IP (best-effort, Cloudflare-aware)
+	 * Get the client IP for the current request.
+	 *
+	 * Trusted-proxy model since 1.7.0, see WCAF_Client_IP.
 	 *
 	 * @return string|false
 	 */
 	public static function get_client_ip() {
-		$keys = [
-			'HTTP_CF_CONNECTING_IP',
-			'HTTP_X_REAL_IP',
-			'HTTP_X_FORWARDED_FOR',
-			'HTTP_CLIENT_IP',
-			'REMOTE_ADDR',
-		];
+		return WCAF_Client_IP::resolve();
+	}
 
-		foreach ( $keys as $k ) {
-			if ( ! empty( $_SERVER[ $k ] ) ) {
-				$val = sanitize_text_field( wp_unslash( $_SERVER[ $k ] ) );
-				if ( 'HTTP_X_FORWARDED_FOR' === $k ) {
-					$parts = explode( ',', $val );
-					$ip    = trim( $parts[0] );
-					return filter_var( $ip, FILTER_VALIDATE_IP ) ? $ip : false;
-				}
-				$ip = trim( $val );
-				return filter_var( $ip, FILTER_VALIDATE_IP ) ? $ip : false;
+	/**
+	 * Public, routable address: not private, link-local, loopback, reserved,
+	 * or carrier-grade NAT (100.64.0.0/10, which filter_var does not cover).
+	 *
+	 * @param string $ip
+	 * @return bool
+	 */
+	public static function is_public_ip( $ip ) {
+		if ( empty( $ip ) || false === filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE ) ) {
+			return false;
+		}
+		return ! self::ip_in_cidr( $ip, '100.64.0.0/10' );
+	}
+
+	/**
+	 * Whether an IP falls inside a CIDR range, IPv4 or IPv6. A bare address is
+	 * an exact match.
+	 *
+	 * @param string $ip
+	 * @param string $cidr
+	 * @return bool
+	 */
+	public static function ip_in_cidr( $ip, $cidr ) {
+		$cidr = trim( (string) $cidr );
+		if ( false === strpos( $cidr, '/' ) ) {
+			$a = @inet_pton( $ip );
+			$b = @inet_pton( $cidr );
+			return false !== $a && false !== $b && $a === $b;
+		}
+		list( $subnet, $bits ) = explode( '/', $cidr, 2 );
+		if ( ! is_numeric( $bits ) ) {
+			return false;
+		}
+		$ip_bin  = @inet_pton( $ip );
+		$sub_bin = @inet_pton( $subnet );
+		if ( false === $ip_bin || false === $sub_bin || strlen( $ip_bin ) !== strlen( $sub_bin ) ) {
+			return false;
+		}
+		$bits = (int) $bits;
+		$max  = strlen( $ip_bin ) * 8;
+		if ( $bits < 0 || $bits > $max ) {
+			return false;
+		}
+		$full = intdiv( $bits, 8 );
+		$rem  = $bits % 8;
+		if ( $full > 0 && substr( $ip_bin, 0, $full ) !== substr( $sub_bin, 0, $full ) ) {
+			return false;
+		}
+		if ( $rem > 0 ) {
+			$mask = ( 0xFF << ( 8 - $rem ) ) & 0xFF;
+			if ( ( ord( $ip_bin[ $full ] ) & $mask ) !== ( ord( $sub_bin[ $full ] ) & $mask ) ) {
+				return false;
 			}
 		}
-		return false;
+		return true;
 	}
 
 	/**
@@ -203,33 +242,23 @@ class WCAF_Helpers {
 	}
 
 	/**
-	 * Check an IP against a newline-separated list of IPs and IPv4 CIDR ranges.
+	 * Check an IP against a list of IPs and CIDR ranges (IPv4 and IPv6).
 	 *
-	 * @param string $ip
-	 * @param string $raw_list One entry per line.
+	 * @param string       $ip
+	 * @param string|array $list Newline-separated string, or an array of entries.
 	 * @return bool
 	 */
-	public static function ip_in_list( $ip, $raw_list ) {
-		if ( empty( $ip ) || empty( $raw_list ) ) {
+	public static function ip_in_list( $ip, $list ) {
+		if ( empty( $ip ) || empty( $list ) ) {
 			return false;
 		}
-		$entries = array_filter( array_map( 'trim', preg_split( '/\r\n|\r|\n/', $raw_list ) ) );
-		$ip_long = ip2long( $ip );
+		$entries = is_array( $list ) ? $list : preg_split( '/\r\n|\r|\n/', $list );
 		foreach ( $entries as $entry ) {
-			if ( false !== strpos( $entry, '/' ) ) {
-				if ( false === $ip_long ) {
-					continue; // IPv6 address against an IPv4 range.
-				}
-				list( $subnet, $bits ) = explode( '/', $entry, 2 );
-				$bits        = intval( $bits );
-				$subnet_long = ip2long( $subnet );
-				if ( false !== $subnet_long && $bits >= 0 && $bits <= 32 ) {
-					$mask = -1 << ( 32 - $bits );
-					if ( ( $ip_long & $mask ) === ( $subnet_long & $mask ) ) {
-						return true;
-					}
-				}
-			} elseif ( $ip === $entry ) {
+			$entry = trim( (string) $entry );
+			if ( '' === $entry || '#' === $entry[0] ) {
+				continue;
+			}
+			if ( self::ip_in_cidr( $ip, $entry ) ) {
 				return true;
 			}
 		}

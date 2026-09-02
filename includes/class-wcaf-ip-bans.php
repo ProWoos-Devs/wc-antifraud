@@ -74,6 +74,11 @@ class WCAF_IP_Bans {
 		if ( empty( $opts['enable_auto_ban'] ) ) {
 			return false;
 		}
+		// An undeclared proxy in front of the site means every customer shares
+		// one address; banning it would ban them all.
+		if ( WCAF_Client_IP::ip_rules_suspended() ) {
+			return false;
+		}
 		if ( self::is_banned( $ip ) ) {
 			return false;
 		}

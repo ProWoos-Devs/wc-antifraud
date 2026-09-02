@@ -161,7 +161,11 @@ class WCAF_Decline_Clusters {
 			return;
 		}
 
-		$keys = array_filter( [ (string) $order->get_meta( self::VISITOR_META ), self::ip_key( $ip ) ] );
+		// While an undeclared proxy hides the real addresses, the IP key would
+		// count every customer's failures under the proxy's address; keep only
+		// the session key.
+		$ip_key = WCAF_Client_IP::ip_rules_suspended() ? '' : self::ip_key( $ip );
+		$keys   = array_filter( [ (string) $order->get_meta( self::VISITOR_META ), $ip_key ] );
 		if ( empty( $keys ) ) {
 			return;
 		}
@@ -221,7 +225,8 @@ class WCAF_Decline_Clusters {
 		if ( 0 === $threshold ) {
 			return false;
 		}
-		foreach ( [ self::current_visitor_key(), self::ip_key( $ip ) ] as $key ) {
+		$ip_key = WCAF_Client_IP::ip_rules_suspended() ? '' : self::ip_key( $ip );
+		foreach ( [ self::current_visitor_key(), $ip_key ] as $key ) {
 			if ( self::failures_for( $key ) >= $threshold ) {
 				return true;
 			}

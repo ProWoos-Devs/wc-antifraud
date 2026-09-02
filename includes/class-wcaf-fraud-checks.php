@@ -313,8 +313,8 @@ class WCAF_Fraud_Checks {
 			$reasons[] = __( 'Proxy/VPN Detected', 'wc-antifraud' );
 		}
 
-		// IP repeat
-		if ( ! empty( $opts['enable_ip_repeat'] ) && $ip ) {
+		// IP repeat (suspended while an undeclared proxy hides the real addresses)
+		if ( ! empty( $opts['enable_ip_repeat'] ) && $ip && ! WCAF_Client_IP::ip_rules_suspended() ) {
 			if ( WCAF_IP_Tracker::track_and_check( $ip, $order->get_id(), $opts ) ) {
 				$reasons[] = __( 'Multiple Orders from Same IP', 'wc-antifraud' );
 			}
