@@ -103,6 +103,26 @@ class WCAF_Order_Status {
 		// "Block this customer" in the order-screen Actions dropdown.
 		add_filter( 'woocommerce_order_actions', [ __CLASS__, 'register_order_action' ], 10, 2 );
 		add_action( 'woocommerce_order_action_' . self::BLOCK_ACTION, [ __CLASS__, 'handle_block_customer' ] );
+
+		// Count fraud orders an admin moves back to a normal status (the
+		// false-positive signal in the usage counters).
+		add_action( 'woocommerce_order_status_changed', [ __CLASS__, 'track_unmark' ], 10, 3 );
+	}
+
+	/**
+	 * @param int    $order_id
+	 * @param string $from
+	 * @param string $to
+	 */
+	public static function track_unmark( $order_id, $from, $to ) {
+		if ( ! in_array( $from, self::fraud_statuses(), true ) || in_array( $to, self::fraud_statuses(), true ) ) {
+			return;
+		}
+		// A refund keeps the fraud designation (persistent flag); it is not an un-mark.
+		if ( 'refunded' === $to || ! is_admin() || wp_doing_cron() ) {
+			return;
+		}
+		WCAF_Stats::bump( 'unmarked' );
 	}
 
 	/**
@@ -187,6 +207,7 @@ class WCAF_Order_Status {
 		}
 
 		update_option( WC_Antifraud::OPTION_KEY, $opts );
+		WCAF_Stats::bump( 'block_customer' );
 		$order->add_order_note(
 			sprintf(
 				/* translators: %s: comma-separated list of what was added */
@@ -420,6 +441,7 @@ class WCAF_Order_Status {
 		// update_status() calls save(), which persists this pending meta.
 		$order->update_meta_data( self::FRAUD_FLAG_META, 'yes' );
 		$order->update_status( $status, $note );
+		WCAF_Stats::bump( 'marked:' . $status );
 
 		// Report the attacking IP to AbuseIPDB (no-op unless enabled and an
 		// API key is configured). Runs here so both automatic detections and
@@ -488,6 +510,7 @@ class WCAF_Order_Status {
 				continue;
 			}
 			if ( self::mark_as_fraud( $order, [ __( 'Manually marked as fraud by admin', 'wc-antifraud' ) ] ) ) {
+				WCAF_Stats::bump( 'manual_mark' );
 				$count++;
 			}
 		}

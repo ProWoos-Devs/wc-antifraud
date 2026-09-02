@@ -179,6 +179,9 @@ class WCAF_Decline_Clusters {
 				'first'    => (int) $existing['first'],
 				'last'     => $now,
 			];
+			if ( self::ALERT_FROM === $clusters[ $key ]['failures'] ) {
+				WCAF_Stats::bump( 'decline_alert' );
+			}
 		}
 		self::save( $clusters );
 	}

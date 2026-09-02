@@ -1,6 +1,6 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.7.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.8.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
@@ -8,7 +8,7 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, repeated-payment-failure detection with optional pre-payment blocking and auto-ban, blacklists and allowlist (email, IP, phone), a bundled disposable-email list, REST API hardening, registration protection, and automated fraud management with a monitor mode and email alerts.
 
-> **Current Version: 1.7.0** | **Released: September 2, 2026**
+> **Current Version: 1.8.0** | **Released: September 2, 2026**
 
 ## Features
 
@@ -52,6 +52,13 @@
 - Tabbed settings UI: Detection Rules, Lists, Notifications, Activity Log, Reports
 - Activity log of cancelled and monitor-flagged orders
 - Reports dashboard with fraud summary counts and top offenders
+
+## Privacy
+
+WC Antifraud sends nothing anywhere by default. Two features contact outside services, both opt-in:
+
+- **AbuseIPDB reporting** (Reports tab) sends the IP, the detection reasons, and the order timestamp of orders marked as fraud to abuseipdb.com. Never customer data.
+- **Anonymous usage reports** (Notifications > Privacy, asked once after activation) send one report a day to prowoos.com containing only: a random install ID (never your site address); plugin, WordPress, WooCommerce, and PHP versions and the site locale; whether HPOS, the Block Checkout, and Order Attribution are in use; which rules are on and the detection mode; whether Cloudflare or a proxy was detected; and yesterday's event counts (orders marked by reason, monitor flags, checkouts refused by reason, REST blocks, repeated-failure alerts, auto-bans, bans lifted by hand, "Block this customer" uses, fraud orders un-marked by an admin). Never emails, IP addresses, order details, URLs, or user data. You can stop at any time, and "Delete my data" asks the receiver to remove everything stored for your install ID.
 
 ## Requirements
 

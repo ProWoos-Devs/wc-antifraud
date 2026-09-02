@@ -50,6 +50,8 @@ class WC_Antifraud {
 		$dir = WCAF_PLUGIN_DIR . 'includes/';
 		require_once $dir . 'class-wcaf-helpers.php';
 		require_once $dir . 'class-wcaf-client-ip.php';
+		require_once $dir . 'class-wcaf-stats.php';
+		require_once $dir . 'class-wcaf-telemetry.php';
 		require_once $dir . 'class-wcaf-ip-tracker.php';
 		require_once $dir . 'class-wcaf-ip-bans.php';
 		require_once $dir . 'class-wcaf-decline-clusters.php';
@@ -105,6 +107,9 @@ class WC_Antifraud {
 		// detection of an undeclared public-address proxy (admin only).
 		WCAF_Client_IP::init();
 
+		// Opt-in anonymous usage reports (nothing sent without consent).
+		WCAF_Telemetry::init();
+
 		new WCAF_Fraud_Checks();
 
 		// Record Stripe decline detail on failed orders (no-op if the Stripe
@@ -131,6 +136,7 @@ class WC_Antifraud {
 		WCAF_IP_Tracker::initialize();
 		WCAF_Client_IP::ensure_cron();
 		WCAF_Client_IP::refresh_cloudflare_ranges();
+		WCAF_Telemetry::ensure_cron();
 		flush_rewrite_rules();
 	}
 
@@ -140,6 +146,7 @@ class WC_Antifraud {
 	public function deactivate() {
 		WCAF_IP_Tracker::cleanup_old_data();
 		WCAF_Client_IP::unschedule();
+		WCAF_Telemetry::unschedule();
 		flush_rewrite_rules();
 	}
 
@@ -173,6 +180,8 @@ class WC_Antifraud {
 			'allowed_ips'               => '',
 			'trusted_proxies'           => '',
 			'trust_all_proxy_headers'   => 0,
+			'telemetry_consent'         => '',
+			'telemetry_install_id'      => '',
 			'blocked_emails'            => '',
 			'blocked_ips'               => '',
 			'blocked_phones'            => '',

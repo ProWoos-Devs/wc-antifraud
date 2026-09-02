@@ -86,6 +86,7 @@ class WCAF_Fraud_Checks {
 
 		$reason = $this->pre_payment_block_reason( $email, $phone, WCAF_Helpers::get_client_ip() );
 		if ( '' !== $reason ) {
+			WCAF_Stats::bump( 'refused:' . $reason );
 			$errors->add( 'wcaf_' . $reason, $this->block_message() );
 		}
 	}
@@ -105,6 +106,7 @@ class WCAF_Fraud_Checks {
 		if ( '' === $reason ) {
 			return;
 		}
+		WCAF_Stats::bump( 'refused:' . $reason );
 		if ( class_exists( '\Automattic\WooCommerce\StoreApi\Exceptions\RouteException' ) ) {
 			throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException( 'wcaf_' . $reason, $this->block_message(), 403 );
 		}
@@ -209,7 +211,7 @@ class WCAF_Fraud_Checks {
 			}
 			$this->handle_suspicious_order(
 				$order,
-				[ __( 'Unknown Origin (no attribution / no checkout session)', 'wc-antifraud' ) ]
+				[ 'unknown_origin' => __( 'Unknown Origin (no attribution / no checkout session)', 'wc-antifraud' ) ]
 			);
 		}
 	}
@@ -248,7 +250,7 @@ class WCAF_Fraud_Checks {
 	 * Run all fraud indicator checks
 	 *
 	 * @param WC_Order $order
-	 * @return array Fraud reasons
+	 * @return array Fraud reasons, slug => label
 	 */
 	private function detect_fraud_indicators( $order ) {
 		$reasons = [];
@@ -271,7 +273,7 @@ class WCAF_Fraud_Checks {
 		if ( ! WCAF_Helpers::order_attribution_enabled() ) {
 			// no attribution-based signal available on this store
 		} elseif ( 'store-api' === $created_via && empty( $order->get_meta( '_wc_order_attribution_source_type' ) ) ) {
-			$reasons[] = __( 'Store API Bot Order (no checkout session)', 'wc-antifraud' );
+			$reasons['store_api_bot'] = __( 'Store API Bot Order (no checkout session)', 'wc-antifraud' );
 		} elseif ( $this->is_unknown_origin_check_enabled() && $this->is_unknown_origin_order( $order ) ) {
 			// Unknown origin (optional toggle) — ANY customer-facing order with no
 			// WC attribution data, classic checkout included. Real orders always
@@ -279,44 +281,44 @@ class WCAF_Fraud_Checks {
 			// and JS-requiring gateways force it), so empty attribution means the
 			// order never loaded the checkout page. elseif avoids double-counting a
 			// store-api bot, which the check above already covers.
-			$reasons[] = __( 'Unknown Origin (no attribution / no checkout session)', 'wc-antifraud' );
+			$reasons['unknown_origin'] = __( 'Unknown Origin (no attribution / no checkout session)', 'wc-antifraud' );
 		}
 
 		// Suspicious amount
 		if ( WCAF_Helpers::is_amount_suspicious( floatval( $order->get_total() ), floatval( $opts['target_amount'] ), floatval( $opts['amount_tolerance'] ) ) ) {
-			$reasons[] = sprintf( __( 'Suspicious Amount (%s)', 'wc-antifraud' ), wc_price( $opts['target_amount'] ) );
+			$reasons['amount'] = sprintf( __( 'Suspicious Amount (%s)', 'wc-antifraud' ), wc_price( $opts['target_amount'] ) );
 		}
 
 		// Blacklisted email address
 		if ( WCAF_Helpers::is_email_address_blocked( $order->get_billing_email(), $opts ) ) {
-			$reasons[] = __( 'Blacklisted Email Address', 'wc-antifraud' );
+			$reasons['blacklist_email'] = __( 'Blacklisted Email Address', 'wc-antifraud' );
 		}
 
 		// Blocked email domain (merchant list + bundled disposable list)
 		if ( ! empty( $opts['enable_disposable'] ) && WCAF_Helpers::is_email_blocked( $order->get_billing_email(), $opts ) ) {
-			$reasons[] = __( 'Blocked Email Domain', 'wc-antifraud' );
+			$reasons['blocked_domain'] = __( 'Blocked Email Domain', 'wc-antifraud' );
 		}
 
 		// Blocked IP
 		if ( $ip && WCAF_Helpers::is_ip_blocked( $ip, $opts ) ) {
-			$reasons[] = __( 'Blacklisted IP Address', 'wc-antifraud' );
+			$reasons['blacklist_ip'] = __( 'Blacklisted IP Address', 'wc-antifraud' );
 		}
 
 		// Blocked phone
 		if ( WCAF_Helpers::is_phone_blocked( $order->get_billing_phone(), $opts ) ) {
-			$reasons[] = __( 'Blacklisted Phone Number', 'wc-antifraud' );
+			$reasons['blacklist_phone'] = __( 'Blacklisted Phone Number', 'wc-antifraud' );
 		}
 
 		// Proxy/VPN (request headers, so only meaningful when the customer's own
 		// request is the one running this analysis)
 		if ( ! empty( $opts['enable_proxy_check'] ) && WCAF_Helpers::is_proxy_detected() ) {
-			$reasons[] = __( 'Proxy/VPN Detected', 'wc-antifraud' );
+			$reasons['proxy'] = __( 'Proxy/VPN Detected', 'wc-antifraud' );
 		}
 
 		// IP repeat (suspended while an undeclared proxy hides the real addresses)
 		if ( ! empty( $opts['enable_ip_repeat'] ) && $ip && ! WCAF_Client_IP::ip_rules_suspended() ) {
 			if ( WCAF_IP_Tracker::track_and_check( $ip, $order->get_id(), $opts ) ) {
-				$reasons[] = __( 'Multiple Orders from Same IP', 'wc-antifraud' );
+				$reasons['ip_repeat'] = __( 'Multiple Orders from Same IP', 'wc-antifraud' );
 			}
 		}
 
@@ -361,16 +363,21 @@ class WCAF_Fraud_Checks {
 	 * status or reporting the IP, alert, fire the extension hook.
 	 *
 	 * @param WC_Order $order
-	 * @param array    $reasons
+	 * @param array    $reasons slug => label
 	 */
 	private function handle_suspicious_order( $order, $reasons ) {
 		$monitor = WCAF_Helpers::is_monitor_mode( $this->options );
+		$labels  = array_values( $reasons );
 		if ( $monitor ) {
-			WCAF_Order_Status::flag_for_review( $order, $reasons );
+			WCAF_Order_Status::flag_for_review( $order, $labels );
+			WCAF_Stats::bump( 'monitor_flagged' );
 		} else {
-			WCAF_Order_Status::mark_as_fraud( $order, $reasons );
+			WCAF_Order_Status::mark_as_fraud( $order, $labels );
 		}
-		WCAF_Email_Alerts::send_alert( $order, $reasons, $this->options, $monitor );
-		do_action( 'wcaf_suspicious_order_detected', $order, $reasons, $monitor );
+		foreach ( array_keys( $reasons ) as $slug ) {
+			WCAF_Stats::bump( 'reason:' . $slug );
+		}
+		WCAF_Email_Alerts::send_alert( $order, $labels, $this->options, $monitor );
+		do_action( 'wcaf_suspicious_order_detected', $order, $labels, $monitor );
 	}
 }

@@ -72,6 +72,7 @@ class WCAF_REST_Hardening {
 		// Temporarily banned IPs get nothing, whatever credentials they carry.
 		if ( $ip && WCAF_IP_Bans::is_banned( $ip ) ) {
 			error_log( sprintf( 'WC Antifraud: Blocked REST API order creation from banned IP. Route: %s, IP: %s', $route, $ip ) );
+			WCAF_Stats::bump( 'rest_block' );
 			return new WP_Error( self::ERROR_CODE, __( 'Order creation via REST API is not permitted.', 'wc-antifraud' ), [ 'status' => 403 ] );
 		}
 
@@ -103,6 +104,7 @@ class WCAF_REST_Hardening {
 		}
 
 		error_log( sprintf( 'WC Antifraud: Blocked REST API order creation. Route: %s, IP: %s', $route, $ip ?: 'unknown' ) );
+		WCAF_Stats::bump( 'rest_block' );
 
 		return new WP_Error( self::ERROR_CODE, __( 'Order creation via REST API is not permitted.', 'wc-antifraud' ), [ 'status' => 403 ] );
 	}

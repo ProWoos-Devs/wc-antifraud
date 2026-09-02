@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-02
+
+### Added
+- **Opt-in anonymous usage reports.** Nothing is sent until an administrator answers the one-time question (admin notice with "Allow anonymous usage data" and "No thanks", also under Notifications > Privacy). A report goes out once a day from WP cron, never from a customer request, to `https://prowoos.com/wp-json/prowoos-telemetry/v1/report` (filter `wcaf_telemetry_endpoint`). It is keyed by a random install ID created at consent, never the site address, and contains: plugin, WordPress, WooCommerce, and PHP versions and the locale; whether HPOS, the Block Checkout, and Order Attribution are in use; which rules are on and the detection mode; whether Cloudflare or a proxy was detected and whether the legacy proxy mode is on; and the previous day's event counts. Never emails, IP addresses, order details, URLs, or user data. Withdrawing consent stops the reports and deletes the install ID; "Delete my data and stop" also asks the receiver to remove everything it holds for that ID. The Privacy section shows the last report's result and a "Send a report now" link. The full field list is in README.md under Privacy.
+- **Daily event counters** (`wcaf_daily_stats`, 30 days, UTC): orders marked as fraud by status and by reason slug, monitor flags, checkouts refused pre-payment by reason, REST hardening blocks, repeated-failure alerts, auto-bans, bans lifted by hand, "Block this customer" uses, manual fraud marks, and fraud orders an admin moved back to a normal status (the false-positive signal). These feed the report and are available to the Reports tab without scanning orders.
+
+### Changed
+- Fraud reasons are now carried internally as slug => label pairs (`store_api_bot`, `unknown_origin`, `amount`, `blacklist_email`, `blocked_domain`, `blacklist_ip`, `blacklist_phone`, `proxy`, `ip_repeat`). Order notes, emails, and the `wcaf_suspicious_order_detected` hook still receive the translated labels as before.
+
 ## [1.7.0] - 2026-09-02
 
 ### Fixed

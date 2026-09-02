@@ -171,6 +171,11 @@ class WCAF_Settings {
 			echo '<p>' . esc_html__( 'Configure who gets notified when fraud is detected.', 'wc-antifraud' ) . '</p>';
 		}, 'wc-antifraud' );
 		add_settings_field( 'email_recipients', __( 'Alert email recipients', 'wc-antifraud' ), [ __CLASS__, 'field_recipients' ], 'wc-antifraud', 'wcaf_notif' );
+
+		add_settings_section( 'wcaf_privacy', __( 'Privacy', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'Anonymous usage reports help tune the default rules from real stores. Nothing is sent without your consent, and never emails, IP addresses, order details, your site address, or any user data.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud' );
+		add_settings_field( 'telemetry_consent', __( 'Anonymous usage reports', 'wc-antifraud' ), [ __CLASS__, 'field_telemetry' ], 'wc-antifraud', 'wcaf_privacy' );
 	}
 
 	/**
@@ -241,6 +246,14 @@ class WCAF_Settings {
 		}
 
 		if ( 'notifications' === $tab ) {
+			$consent = isset( $input['telemetry_consent'] ) && 'yes' === $input['telemetry_consent'] ? 'yes' : 'no';
+			$output['telemetry_consent'] = $consent;
+			if ( 'yes' === $consent && empty( $output['telemetry_install_id'] ) ) {
+				$output['telemetry_install_id'] = bin2hex( random_bytes( 16 ) );
+			}
+			if ( 'no' === $consent ) {
+				$output['telemetry_install_id'] = '';
+			}
 			$output['email_recipients'] = isset( $input['email_recipients'] ) ? sanitize_text_field( $input['email_recipients'] ) : '';
 			if ( ! empty( $output['email_recipients'] ) && empty( WCAF_Helpers::sanitize_email_list( $output['email_recipients'] ) ) ) {
 				add_settings_error( 'email_recipients', 'invalid_emails', __( 'Please provide valid email addresses.', 'wc-antifraud' ), 'error' );
@@ -276,8 +289,10 @@ class WCAF_Settings {
 		if ( 'unban' === $action && ! empty( $_GET['ip'] ) ) {
 			$ip = sanitize_text_field( wp_unslash( $_GET['ip'] ) );
 			WCAF_IP_Bans::unban( $ip );
+			WCAF_Stats::bump( 'manual_unban' );
 			$notice = 'unbanned';
 		} elseif ( 'clear_bans' === $action ) {
+			WCAF_Stats::bump( 'manual_unban', count( WCAF_IP_Bans::active() ) );
 			WCAF_IP_Bans::clear_all();
 			$notice = 'bans_cleared';
 		} elseif ( 'reset_declines' === $action ) {
@@ -291,6 +306,16 @@ class WCAF_Settings {
 			$notice = 'proxy_dismissed';
 		} elseif ( 'refresh_cf' === $action ) {
 			$notice = WCAF_Client_IP::refresh_cloudflare_ranges() ? 'cf_refreshed' : 'cf_refresh_failed';
+		} elseif ( 'telemetry_yes' === $action ) {
+			WCAF_Telemetry::set_consent( true );
+			$notice = 'telemetry_on';
+		} elseif ( 'telemetry_no' === $action ) {
+			WCAF_Telemetry::set_consent( false );
+			$notice = 'telemetry_off';
+		} elseif ( 'telemetry_send' === $action ) {
+			$notice = WCAF_Telemetry::send() ? 'telemetry_sent' : 'telemetry_failed';
+		} elseif ( 'telemetry_delete' === $action ) {
+			$notice = WCAF_Telemetry::delete_remote() ? 'telemetry_deleted' : 'telemetry_delete_failed';
 		}
 
 		$redirect = remove_query_arg( [ 'wcaf_action', 'ip', '_wpnonce' ] );
@@ -313,11 +338,17 @@ class WCAF_Settings {
 			'proxy_dismissed' => __( 'Noted. That address will not be reported as a proxy for 30 days.', 'wc-antifraud' ),
 			'cf_refreshed'   => __( 'Cloudflare IP ranges refreshed.', 'wc-antifraud' ),
 			'cf_refresh_failed' => __( 'Cloudflare IP ranges could not be fetched; the previous set is still in use.', 'wc-antifraud' ),
+			'telemetry_on'   => __( 'Thank you. Anonymous usage reports are on; the first one goes out with the next daily run.', 'wc-antifraud' ),
+			'telemetry_off'  => __( 'Anonymous usage reports are off.', 'wc-antifraud' ),
+			'telemetry_sent' => __( 'Report sent.', 'wc-antifraud' ),
+			'telemetry_failed' => __( 'The report could not be sent (consent missing, or the receiver did not answer 200). See the status line under Privacy.', 'wc-antifraud' ),
+			'telemetry_deleted' => __( 'The receiver confirmed the deletion. Reports are off and the install ID was removed.', 'wc-antifraud' ),
+			'telemetry_delete_failed' => __( 'Reports are off and the install ID was removed locally, but the receiver could not be reached to confirm the deletion.', 'wc-antifraud' ),
 		];
 		if ( ! isset( $messages[ $key ] ) ) {
 			return;
 		}
-		$type = 'cf_refresh_failed' === $key ? 'warning' : 'success';
+		$type = in_array( $key, [ 'cf_refresh_failed', 'telemetry_failed', 'telemetry_delete_failed' ], true ) ? 'warning' : 'success';
 		printf( '<div class="notice notice-%s is-dismissible"><p>%s</p></div>', esc_attr( $type ), esc_html( $messages[ $key ] ) );
 	}
 
@@ -971,6 +1002,40 @@ class WCAF_Settings {
 			esc_attr( self::key() ), esc_attr( $o['email_recipients'] ),
 			esc_html__( 'Comma-separated emails that receive fraud alerts.', 'wc-antifraud' )
 		);
+	}
+
+	public static function field_telemetry() {
+		$consent = WCAF_Telemetry::consent();
+		$items   = '';
+		foreach ( WCAF_Telemetry::fields() as $f ) {
+			$items .= '<li>' . esc_html( $f ) . '</li>';
+		}
+		printf(
+			'<fieldset><label><input name="%1$s[telemetry_consent]" type="radio" value="yes" %2$s /> %3$s</label><br /><label><input name="%1$s[telemetry_consent]" type="radio" value="no" %4$s /> %5$s</label></fieldset><p class="description">%6$s</p><ul class="description" style="list-style:disc;margin-left:20px;">%7$s</ul>',
+			esc_attr( self::key() ),
+			checked( 'yes', $consent, false ),
+			esc_html__( 'Send an anonymous report once a day', 'wc-antifraud' ),
+			checked( 'yes' === $consent ? 'yes' : 'no', 'no', false ),
+			esc_html__( 'Do not send anything', 'wc-antifraud' ),
+			esc_html__( 'A report contains only:', 'wc-antifraud' ),
+			$items // already escaped
+		);
+		$status = WCAF_Telemetry::status();
+		if ( 'yes' === $consent ) {
+			$line = $status['last_sent']
+				? sprintf( /* translators: 1: date, 2: HTTP status or error */ __( 'Last report: %1$s, %2$s.', 'wc-antifraud' ), date_i18n( 'M j, Y g:i a', $status['last_sent'] ), 200 === (int) $status['last_code'] ? __( 'accepted', 'wc-antifraud' ) : ( $status['last_error'] ? $status['last_error'] : 'HTTP ' . (int) $status['last_code'] ) )
+				: __( 'No report sent yet.', 'wc-antifraud' );
+			printf(
+				'<p class="description">%s <a href="%s">%s</a> &middot; <a href="%s">%s</a> &middot; %s <code>%s</code></p>',
+				esc_html( $line ),
+				esc_url( wp_nonce_url( admin_url( 'admin.php?page=wc-antifraud&tab=notifications&wcaf_action=telemetry_send' ), self::ACTION_NONCE ) ),
+				esc_html__( 'Send a report now', 'wc-antifraud' ),
+				esc_url( wp_nonce_url( admin_url( 'admin.php?page=wc-antifraud&tab=notifications&wcaf_action=telemetry_delete' ), self::ACTION_NONCE ) ),
+				esc_html__( 'Delete my data and stop', 'wc-antifraud' ),
+				esc_html__( 'Install ID:', 'wc-antifraud' ),
+				esc_html( WCAF_Telemetry::install_id() )
+			);
+		}
 	}
 
 	public static function field_enable_abuseipdb() {

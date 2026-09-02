@@ -82,7 +82,11 @@ class WCAF_IP_Bans {
 		if ( self::is_banned( $ip ) ) {
 			return false;
 		}
-		return self::ban( $ip, (int) ( $opts['auto_ban_minutes'] ?? 60 ), $reason );
+		$banned = self::ban( $ip, (int) ( $opts['auto_ban_minutes'] ?? 60 ), $reason );
+		if ( $banned ) {
+			WCAF_Stats::bump( 'auto_ban' );
+		}
+		return $banned;
 	}
 
 	/**
