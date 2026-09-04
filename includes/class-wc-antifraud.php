@@ -163,6 +163,8 @@ class WC_Antifraud {
 			'email_recipients'          => get_option( 'admin_email' ),
 			'enable_unknown_origin'     => 1,
 			'enable_stripe_decline'     => 1,
+			'enable_linked_fraud'       => 1,
+			'linked_fraud_days'         => 30,
 			'enable_disposable'         => 0,
 			'disposable_domains'        => '',
 			'enable_proxy_check'        => 0,

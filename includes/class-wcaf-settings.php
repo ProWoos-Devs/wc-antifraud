@@ -104,6 +104,12 @@ class WCAF_Settings {
 		}, 'wc-antifraud' );
 		add_settings_field( 'enable_stripe_decline', __( 'Stripe fraud-decline tagging', 'wc-antifraud' ), [ __CLASS__, 'field_stripe_decline' ], 'wc-antifraud', 'wcaf_gateway' );
 
+		add_settings_section( 'wcaf_linked', __( 'Linked to Known Fraud', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'The same actor rarely stops at one attempt: a second card through another gateway seconds later, or a new name and card a few hours on, shipping to the same address. This rule ties a new order to an order already marked fraud when they share the billing email, the ship-to street and postcode, or (within an hour) the customer IP.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud' );
+		add_settings_field( 'enable_linked_fraud', __( 'Linked-fraud detection', 'wc-antifraud' ), [ __CLASS__, 'field_linked_fraud' ], 'wc-antifraud', 'wcaf_linked' );
+		add_settings_field( 'linked_fraud_days', __( 'Look back', 'wc-antifraud' ), [ __CLASS__, 'field_linked_fraud_days' ], 'wc-antifraud', 'wcaf_linked' );
+
 		add_settings_section( 'wcaf_declines', __( 'Repeated Payment Failures', 'wc-antifraud' ), function () {
 			echo '<p>' . esc_html__( 'Card testing is defined by declines: a shopper fails once or twice, a bot working through stolen card numbers fails over and over from one checkout session or one IP. Failed payments are counted per visitor over a rolling 24 hours. From 5 failures an admin notice appears. Optionally, further checkouts from that visitor are refused before they reach the gateway.', 'wc-antifraud' ) . '</p>';
 		}, 'wc-antifraud' );
@@ -211,6 +217,8 @@ class WCAF_Settings {
 			$output['detection_mode']            = ( isset( $input['detection_mode'] ) && 'monitor' === $input['detection_mode'] ) ? 'monitor' : 'block';
 			$output['enable_unknown_origin']     = ! empty( $input['enable_unknown_origin'] ) ? 1 : 0;
 			$output['enable_stripe_decline']     = ! empty( $input['enable_stripe_decline'] ) ? 1 : 0;
+			$output['enable_linked_fraud']       = ! empty( $input['enable_linked_fraud'] ) ? 1 : 0;
+			if ( isset( $input['linked_fraud_days'] ) ) { $output['linked_fraud_days'] = min( 365, max( 1, absint( $input['linked_fraud_days'] ) ) ); }
 			$output['enable_proxy_check']        = ! empty( $input['enable_proxy_check'] ) ? 1 : 0;
 			$output['enable_ip_repeat']          = ! empty( $input['enable_ip_repeat'] ) ? 1 : 0;
 			$output['enable_rest_hardening']     = ! empty( $input['enable_rest_hardening'] ) ? 1 : 0;
@@ -763,6 +771,24 @@ class WCAF_Settings {
 			esc_attr( self::key() ), checked( 1, $o['enable_stripe_decline'], false ),
 			esc_html__( 'Mark orders as "Cancelled by Stripe" when Stripe reports the decline as fraudulent', 'wc-antifraud' ),
 			esc_html__( 'Applies when Stripe Radar blocks a payment as too risky, or the card issuer returns a fraud decline code (fraudulent, stolen/lost/pickup card, merchant blacklist). Only ever affects orders whose payment already failed — the customer is never charged. A detailed decline note and a decline panel on the order screen (risk level, decline code, card details, Stripe Dashboard link) are recorded on every failed Stripe order regardless of this setting. These orders are NOT reported to AbuseIPDB, because a gateway fraud signal can occasionally belong to a real customer.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_linked_fraud() {
+		$o = self::opt();
+		printf( '<label><input name="%s[enable_linked_fraud]" type="checkbox" value="1" %s /> %s</label><p class="description">%s</p>',
+			esc_attr( self::key() ), checked( 1, $o['enable_linked_fraud'], false ),
+			esc_html__( 'Mark orders that share an email, ship-to address, or IP with a recent fraud order', 'wc-antifraud' ),
+			esc_html__( 'Applies to failed orders on every checkout path, where any fraud order can be the link, including a Stripe verdict; nothing was charged, so a wrong link costs nobody a sale. On a paid order only the plugin\'s own detections and manual marks count as links, never a Stripe verdict, because Radar occasionally blocks a real customer and that customer paying another way must keep the sale. An IP match alone only counts within an hour of the earlier order (mobile carriers put thousands of customers behind one address). Orders marked by this rule are NOT reported to AbuseIPDB.', 'wc-antifraud' )
+		);
+	}
+
+	public static function field_linked_fraud_days() {
+		$o = self::opt();
+		printf( '<input name="%s[linked_fraud_days]" type="number" min="1" max="365" value="%s" class="small-text" /> <span class="description">%s</span><p class="description">%s</p>',
+			esc_attr( self::key() ), esc_attr( $o['linked_fraud_days'] ),
+			esc_html__( 'days', 'wc-antifraud' ),
+			esc_html__( 'How far back to look for the fraud order a new order may be linked to. Default 30.', 'wc-antifraud' )
 		);
 	}
 

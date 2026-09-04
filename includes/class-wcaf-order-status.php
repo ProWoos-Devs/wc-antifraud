@@ -229,6 +229,88 @@ class WCAF_Order_Status {
 		return [ self::STATUS_SLUG, self::STRIPE_STATUS_SLUG ];
 	}
 
+	/**
+	 * Recent fraud orders, with the few fields the linked-fraud rule compares.
+	 *
+	 * Direct SQL on purpose: WC_Order_Query maps a status argument to its
+	 * "wc-"-prefixed form, which never matches the unprefixed custom statuses,
+	 * and loading hundreds of order objects on every status transition is too
+	 * heavy. Reads the posts store or the HPOS tables, whichever is authoritative.
+	 * An order counts as fraud when it is in a fraud status OR carries the
+	 * persistent flag (a refunded fraud order has left the status).
+	 *
+	 * @param string $since_gmt  MySQL datetime (GMT); only orders created at or after it.
+	 * @param int    $exclude_id Order to leave out (the one being analyzed).
+	 * @param int    $limit      Row cap, newest first.
+	 * @return array[] Rows: id, created_gmt, email, ip, ship_address_1, ship_postcode, bill_address_1, bill_postcode, status.
+	 */
+	public static function recent_fraud_anchors( $since_gmt, $exclude_id = 0, $limit = 500 ) {
+		global $wpdb;
+
+		$statuses = self::fraud_statuses();
+		foreach ( self::fraud_statuses() as $slug ) {
+			$statuses[] = 'wc-' . $slug;
+		}
+		$placeholders = implode( ', ', array_fill( 0, count( $statuses ), '%s' ) );
+		$limit        = max( 1, (int) $limit );
+
+		$hpos = class_exists( '\Automattic\WooCommerce\Utilities\OrderUtil' )
+			&& \Automattic\WooCommerce\Utilities\OrderUtil::custom_orders_table_usage_is_enabled();
+
+		if ( $hpos ) {
+			$orders = $wpdb->prefix . 'wc_orders';
+			$addr   = $wpdb->prefix . 'wc_order_addresses';
+			$meta   = $wpdb->prefix . 'wc_orders_meta';
+			$sql    = $wpdb->prepare(
+				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names and placeholders built above.
+				"SELECT o.id AS id, o.status AS status, o.date_created_gmt AS created_gmt, o.billing_email AS email, o.ip_address AS ip,
+					s.address_1 AS ship_address_1, s.postcode AS ship_postcode,
+					b.address_1 AS bill_address_1, b.postcode AS bill_postcode
+				FROM {$orders} o
+				LEFT JOIN {$addr} s ON s.order_id = o.id AND s.address_type = 'shipping'
+				LEFT JOIN {$addr} b ON b.order_id = o.id AND b.address_type = 'billing'
+				WHERE o.type = 'shop_order'
+					AND o.status <> 'trash'
+					AND o.date_created_gmt >= %s
+					AND o.id <> %d
+					AND ( o.status IN ( {$placeholders} )
+						OR EXISTS ( SELECT 1 FROM {$meta} m WHERE m.order_id = o.id AND m.meta_key = %s AND m.meta_value IN ( 'yes', '1' ) ) )
+				ORDER BY o.id DESC
+				LIMIT %d",
+				// phpcs:enable
+				array_merge( [ $since_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
+			);
+		} else {
+			$sql = $wpdb->prepare(
+				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- placeholders built above.
+				"SELECT p.ID AS id, p.post_status AS status, p.post_date_gmt AS created_gmt,
+					em.meta_value AS email, ip.meta_value AS ip,
+					sa.meta_value AS ship_address_1, sp.meta_value AS ship_postcode,
+					ba.meta_value AS bill_address_1, bp.meta_value AS bill_postcode
+				FROM {$wpdb->posts} p
+				LEFT JOIN {$wpdb->postmeta} em ON em.post_id = p.ID AND em.meta_key = '_billing_email'
+				LEFT JOIN {$wpdb->postmeta} ip ON ip.post_id = p.ID AND ip.meta_key = '_customer_ip_address'
+				LEFT JOIN {$wpdb->postmeta} sa ON sa.post_id = p.ID AND sa.meta_key = '_shipping_address_1'
+				LEFT JOIN {$wpdb->postmeta} sp ON sp.post_id = p.ID AND sp.meta_key = '_shipping_postcode'
+				LEFT JOIN {$wpdb->postmeta} ba ON ba.post_id = p.ID AND ba.meta_key = '_billing_address_1'
+				LEFT JOIN {$wpdb->postmeta} bp ON bp.post_id = p.ID AND bp.meta_key = '_billing_postcode'
+				WHERE p.post_type = 'shop_order'
+					AND p.post_status <> 'trash'
+					AND p.post_date_gmt >= %s
+					AND p.ID <> %d
+					AND ( p.post_status IN ( {$placeholders} )
+						OR EXISTS ( SELECT 1 FROM {$wpdb->postmeta} f WHERE f.post_id = p.ID AND f.meta_key = %s AND f.meta_value IN ( 'yes', '1' ) ) )
+				ORDER BY p.ID DESC
+				LIMIT %d",
+				// phpcs:enable
+				array_merge( [ $since_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
+			);
+		}
+
+		$rows = $wpdb->get_results( $sql, ARRAY_A ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- prepared above.
+		return is_array( $rows ) ? $rows : [];
+	}
+
 	public static function register_status() {
 		register_post_status(
 			self::STATUS_SLUG,

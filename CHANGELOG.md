@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-09-04
+
+### Added
+- **Linked to known fraud.** A new order is tied to an order already marked fraud in the last 30 days (Detection Rules > Linked to Known Fraud, look-back configurable, on by default) when the two share the billing email, the ship-to street and postcode (compared with spelling and punctuation stripped; the billing address stands in when the order has no shipping address), or the customer IP within an hour of each other. The same actor rarely stops at one attempt: a second card through another gateway seconds after a Radar block, or a new name and card a few hours on, shipping to the same address; without a gateway verdict on the retry, nothing tied those orders together. On a failed order (nothing charged) any fraud order can be the link, a Stripe verdict included. On a paid order only the plugin's own detections and manual marks count, never a Stripe verdict, because Radar occasionally blocks a real customer and that customer paying another way must keep the sale. Customer-facing paths only (classic checkout and Store API); admin, subscription, and imported orders are never linked. Orders marked by this rule alone are not reported to AbuseIPDB (the link is circumstantial and the anchor already reported if it deserved it). The order note names the earlier order and what was shared, reason slug `linked_fraud`.
+- `WCAF_Order_Status::recent_fraud_anchors()`: recent fraud orders with the compared fields in one query, on the posts store or the HPOS tables.
+
 ## [1.8.0] - 2026-09-02
 
 ### Added

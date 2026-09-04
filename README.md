@@ -1,6 +1,6 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.8.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.9.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
@@ -8,13 +8,14 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, repeated-payment-failure detection with optional pre-payment blocking and auto-ban, blacklists and allowlist (email, IP, phone), a bundled disposable-email list, REST API hardening, registration protection, and automated fraud management with a monitor mode and email alerts.
 
-> **Current Version: 1.8.0** | **Released: September 2, 2026**
+> **Current Version: 1.9.0** | **Released: September 4, 2026**
 
 ## Features
 
 ### Detection Rules
 - **Detection mode** - Block (cancel suspicious orders) or Monitor (flag, note, and alert without touching the order status; nothing is reported to AbuseIPDB)
 - **Unknown origin detection** - flag orders placed outside the standard checkout flow
+- **Linked to known fraud** - tie a new order to a recent fraud order sharing the billing email, the ship-to address, or (within an hour) the IP; catches the retry with a second card or gateway and the reshipping pattern that gateway verdicts miss
 - **Repeated payment failures** - failed payments are counted per visitor (checkout session and IP) over a rolling 24 hours; from 5 failures an admin notice appears, and an optional limit refuses further checkouts from that visitor before they reach the gateway, on the classic and the Block Checkout alike
 - **Auto-ban** - when the failure limit refuses a checkout, the IP can be banned for a configurable time; bans expire on their own and never touch allowlisted IPs
 - **Suspicious amount detection** - flag orders matching a known fraudulent amount

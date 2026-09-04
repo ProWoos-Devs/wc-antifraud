@@ -11,6 +11,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WCAF_Fraud_Checks {
 
+	/**
+	 * Linked-fraud rule: an IP shared with a fraud order only counts within this
+	 * many seconds of it. Carrier-grade NAT (mobile networks) puts thousands of
+	 * customers behind one address, so an IP match is only meaningful when the
+	 * two orders are minutes apart, a retry after a block.
+	 */
+	const LINKED_IP_WINDOW = HOUR_IN_SECONDS;
+
+	/** Shortest normalized ship-to key (street + postcode) worth comparing. */
+	const LINKED_ADDRESS_MIN_LENGTH = 6;
+
+	/** Most recent fraud orders considered as anchors. */
+	const LINKED_ANCHOR_LIMIT = 500;
+
 	private $options;
 
 	public function __construct() {
@@ -191,7 +205,7 @@ class WCAF_Fraud_Checks {
 
 		// Store API failed orders are always bots — run the full check set.
 		if ( 'store-api' === $order->get_created_via() ) {
-			$reasons = $this->detect_fraud_indicators( $order );
+			$reasons = $this->detect_fraud_indicators( $order, true );
 			if ( ! empty( $reasons ) ) {
 				$this->handle_suspicious_order( $order, $reasons );
 			}
@@ -204,15 +218,27 @@ class WCAF_Fraud_Checks {
 		// signal — an order with no attribution at all, an unambiguous bot. The
 		// amount and IP-repeat heuristics are deliberately NOT run here, so a genuine
 		// decline+retry can't false-positive.
+		$ip = self::order_ip( $order );
+		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $this->options ) ) {
+			return;
+		}
 		if ( $this->is_unknown_origin_check_enabled() && $this->is_unknown_origin_order( $order ) ) {
-			$ip = self::order_ip( $order );
-			if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $this->options ) ) {
-				return;
-			}
 			$this->handle_suspicious_order(
 				$order,
 				[ 'unknown_origin' => __( 'Unknown Origin (no attribution / no checkout session)', 'wc-antifraud' ) ]
 			);
+			return;
+		}
+
+		// A failed order that shares its email, ship-to address, or (minutes
+		// apart) its IP with an order already marked fraud is the same actor
+		// retrying: a second card, a second gateway, a second name to the same
+		// drop address. Nothing was charged, so relabelling it costs a real
+		// customer nothing. Gateway verdicts count as anchors here, unlike on
+		// the paid path (see detect_fraud_indicators()).
+		$linked = $this->linked_fraud_reason( $order, true );
+		if ( $linked ) {
+			$this->handle_suspicious_order( $order, $linked );
 		}
 	}
 
@@ -250,9 +276,10 @@ class WCAF_Fraud_Checks {
 	 * Run all fraud indicator checks
 	 *
 	 * @param WC_Order $order
+	 * @param bool     $failed Whether the order is being analyzed as a failed/cancelled order (nothing charged).
 	 * @return array Fraud reasons, slug => label
 	 */
-	private function detect_fraud_indicators( $order ) {
+	private function detect_fraud_indicators( $order, $failed = false ) {
 		$reasons = [];
 		$opts    = $this->options;
 		$ip      = self::order_ip( $order );
@@ -322,7 +349,123 @@ class WCAF_Fraud_Checks {
 			}
 		}
 
+		// Linked to known fraud. On a PAID order the anchors are the plugin's own
+		// detections and manual marks only, never a Stripe verdict: Radar does
+		// block real customers now and then, and that customer paying again by
+		// another route must not lose the sale.
+		$reasons += $this->linked_fraud_reason( $order, $failed );
+
 		return $reasons;
+	}
+
+	/**
+	 * Linked-to-known-fraud rule.
+	 *
+	 * Looks for an order marked fraud within the configured window that shares
+	 * with this one, in order of strength: the billing email, the ship-to street
+	 * and postcode (shipping address, or billing when the order has no shipping
+	 * address), or the customer IP within LINKED_IP_WINDOW of the anchor's
+	 * creation. Returns a one-element reasons array (slug => label naming the
+	 * anchor order and the shared datum) or an empty array.
+	 *
+	 * @param WC_Order $order                  Order under analysis.
+	 * @param bool     $include_stripe_anchors Whether "Cancelled by Stripe" orders may anchor the match.
+	 * @return array
+	 */
+	private function linked_fraud_reason( $order, $include_stripe_anchors ) {
+		if ( empty( $this->options['enable_linked_fraud'] ) ) {
+			return [];
+		}
+		// Customer-facing paths only. An order the merchant keys in by hand, a
+		// subscription renewal, or an ERP/POS import is the merchant's decision.
+		if ( ! in_array( $order->get_created_via(), [ 'checkout', 'store-api' ], true ) ) {
+			return [];
+		}
+		$days = max( 1, (int) ( $this->options['linked_fraud_days'] ?? 30 ) );
+
+		$created = $order->get_date_created();
+		$now_ts  = $created ? $created->getTimestamp() : time();
+		$since   = gmdate( 'Y-m-d H:i:s', $now_ts - $days * DAY_IN_SECONDS );
+
+		$anchors = WCAF_Order_Status::recent_fraud_anchors( $since, $order->get_id(), self::LINKED_ANCHOR_LIMIT );
+		if ( empty( $anchors ) ) {
+			return [];
+		}
+
+		$email   = self::normalize_email( $order->get_billing_email() );
+		$address = self::ship_to_key( $order->get_shipping_address_1(), $order->get_shipping_postcode(), $order->get_billing_address_1(), $order->get_billing_postcode() );
+		$ip      = self::order_ip( $order );
+		$use_ip  = $ip && WCAF_Helpers::is_public_ip( $ip ) && ! WCAF_Client_IP::ip_rules_suspended();
+
+		$stripe_status = [ WCAF_Order_Status::STRIPE_STATUS_SLUG, 'wc-' . WCAF_Order_Status::STRIPE_STATUS_SLUG ];
+
+		foreach ( $anchors as $row ) {
+			if ( ! $include_stripe_anchors && in_array( $row['status'], $stripe_status, true ) ) {
+				continue;
+			}
+			$anchor_id = (int) $row['id'];
+			$match     = '';
+
+			if ( '' !== $email && $email === self::normalize_email( $row['email'] ) ) {
+				$match = __( 'same email address', 'wc-antifraud' );
+			} elseif ( '' !== $address && $address === self::ship_to_key( $row['ship_address_1'], $row['ship_postcode'], $row['bill_address_1'], $row['bill_postcode'] ) ) {
+				$match = __( 'same ship-to address', 'wc-antifraud' );
+			} elseif ( $use_ip && $ip === (string) $row['ip'] ) {
+				$anchor_ts = strtotime( (string) $row['created_gmt'] . ' UTC' );
+				if ( $anchor_ts && abs( $now_ts - $anchor_ts ) <= self::LINKED_IP_WINDOW ) {
+					$match = __( 'same IP address minutes apart', 'wc-antifraud' );
+				}
+			}
+
+			if ( '' !== $match ) {
+				return [
+					'linked_fraud' => sprintf(
+						/* translators: 1: order number of the earlier fraud order, 2: what the two orders share */
+						__( 'Linked to known fraud order #%1$d (%2$s)', 'wc-antifraud' ),
+						$anchor_id,
+						$match
+					),
+				];
+			}
+		}
+
+		return [];
+	}
+
+	/**
+	 * Lowercased, trimmed email for comparison.
+	 *
+	 * @param string|null $email
+	 * @return string
+	 */
+	private static function normalize_email( $email ) {
+		return strtolower( trim( (string) $email ) );
+	}
+
+	/**
+	 * Comparable ship-to key: street line plus postcode, lowercased, letters and
+	 * digits only, so "4250 Pittman Grove Church Rd." and "4250 pittman grove
+	 * church rd" compare equal. Falls back to the billing address when the order
+	 * has no shipping street. Empty when too short to mean anything.
+	 *
+	 * @param string|null $ship_address_1
+	 * @param string|null $ship_postcode
+	 * @param string|null $bill_address_1
+	 * @param string|null $bill_postcode
+	 * @return string
+	 */
+	private static function ship_to_key( $ship_address_1, $ship_postcode, $bill_address_1, $bill_postcode ) {
+		$street   = trim( (string) $ship_address_1 );
+		$postcode = (string) $ship_postcode;
+		if ( '' === $street ) {
+			$street   = trim( (string) $bill_address_1 );
+			$postcode = (string) $bill_postcode;
+		}
+		if ( '' === $street ) {
+			return '';
+		}
+		$key = strtolower( preg_replace( '/[^a-z0-9]/i', '', $street . $postcode ) );
+		return strlen( $key ) >= self::LINKED_ADDRESS_MIN_LENGTH ? $key : '';
 	}
 
 	/**
@@ -368,11 +511,16 @@ class WCAF_Fraud_Checks {
 	private function handle_suspicious_order( $order, $reasons ) {
 		$monitor = WCAF_Helpers::is_monitor_mode( $this->options );
 		$labels  = array_values( $reasons );
+		// A link to an earlier fraud order is circumstantial (a shared drop
+		// address, a shared mobile-carrier IP). Like gateway verdicts it never
+		// reports the IP to AbuseIPDB on its own; the anchor already did if it
+		// deserved it, and public reports cannot be taken back.
+		$report_ip = ! empty( array_diff_key( $reasons, [ 'linked_fraud' => true ] ) );
 		if ( $monitor ) {
 			WCAF_Order_Status::flag_for_review( $order, $labels );
 			WCAF_Stats::bump( 'monitor_flagged' );
 		} else {
-			WCAF_Order_Status::mark_as_fraud( $order, $labels );
+			WCAF_Order_Status::mark_as_fraud( $order, $labels, $report_ip );
 		}
 		foreach ( array_keys( $reasons ) as $slug ) {
 			WCAF_Stats::bump( 'reason:' . $slug );

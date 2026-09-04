@@ -120,7 +120,7 @@ class WCAF_Telemetry {
 		}
 
 		$rules = [];
-		foreach ( [ 'enable_unknown_origin', 'enable_stripe_decline', 'enable_disposable', 'enable_proxy_check', 'enable_ip_repeat', 'enable_auto_ban', 'enable_registration_limit', 'enable_rest_hardening', 'enable_abuseipdb' ] as $k ) {
+		foreach ( [ 'enable_unknown_origin', 'enable_stripe_decline', 'enable_linked_fraud', 'enable_disposable', 'enable_proxy_check', 'enable_ip_repeat', 'enable_auto_ban', 'enable_registration_limit', 'enable_rest_hardening', 'enable_abuseipdb' ] as $k ) {
 			$rules[ substr( $k, 7 ) ] = ! empty( $opts[ $k ] );
 		}
 		$rules['decline_limit']  = (int) ( $opts['decline_block_threshold'] ?? 0 ) > 0;
