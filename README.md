@@ -73,7 +73,7 @@ Two optional features send data to outside services:
 
 1. Upload the `wc-antifraud` folder to `/wp-content/plugins/`
 2. Activate the plugin through the WordPress Plugins menu
-3. Go to the **Antifraud** menu in wp-admin to configure. On a new store, start in Monitor mode and switch to Block once the Activity Log shows only real fraud.
+3. Go to the **Antifraud** menu in wp-admin to configure. A new store starts in Monitor mode; switch to Block once the Activity Log shows only real fraud. Stores that were already installed keep the mode they had.
 
 ## Development
 
