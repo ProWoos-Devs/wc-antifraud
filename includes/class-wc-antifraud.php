@@ -81,6 +81,7 @@ class WC_Antifraud {
 	 */
 	public function init() {
 		load_plugin_textdomain( 'wc-antifraud', false, dirname( WCAF_PLUGIN_BASENAME ) . '/languages' );
+		self::upgrade_options();
 		WCAF_Order_Status::init();
 
 		if ( is_admin() ) {
@@ -130,6 +131,9 @@ class WC_Antifraud {
 	 * Plugin activation
 	 */
 	public function activate() {
+		// Runs before the defaults are merged, so re-activating an older install
+		// keeps the behavior it had rather than picking up a changed default.
+		self::upgrade_options();
 		$defaults = self::get_default_options();
 		$existing = get_option( self::OPTION_KEY, [] );
 		update_option( self::OPTION_KEY, wp_parse_args( $existing, $defaults ) );
@@ -151,13 +155,46 @@ class WC_Antifraud {
 	}
 
 	/**
+	 * Option key recording which one-time option upgrades have run.
+	 */
+	const OPTIONS_SCHEMA_OPTION = 'wcaf_options_schema_version';
+
+	/**
+	 * Bump when a default changes in a way that must not reach existing stores.
+	 */
+	const OPTIONS_SCHEMA_VERSION = 1;
+
+	/**
+	 * One-time option upgrades.
+	 *
+	 * The stored option is merged with get_default_options() on every read and a
+	 * key is only written when its settings tab is saved, so changing a default
+	 * would silently change behavior on every store that never saved that tab.
+	 * Each step pins the previous default on installs that predate the change.
+	 *
+	 * Version 1: detection_mode defaulted to "block" through 1.10.0 and defaults
+	 * to "monitor" from the next release; existing stores stay in Block.
+	 */
+	public static function upgrade_options() {
+		if ( (int) get_option( self::OPTIONS_SCHEMA_OPTION, 0 ) >= self::OPTIONS_SCHEMA_VERSION ) {
+			return;
+		}
+		$stored = get_option( self::OPTION_KEY, null );
+		if ( is_array( $stored ) && ! isset( $stored['detection_mode'] ) ) {
+			$stored['detection_mode'] = 'block';
+			update_option( self::OPTION_KEY, $stored );
+		}
+		update_option( self::OPTIONS_SCHEMA_OPTION, self::OPTIONS_SCHEMA_VERSION, false );
+	}
+
+	/**
 	 * Default plugin options
 	 *
 	 * @return array
 	 */
 	public static function get_default_options() {
 		return [
-			'detection_mode'            => 'block',
+			'detection_mode'            => 'monitor',
 			'target_amount'             => 0,
 			'amount_tolerance'          => 0.01,
 			'email_recipients'          => get_option( 'admin_email' ),

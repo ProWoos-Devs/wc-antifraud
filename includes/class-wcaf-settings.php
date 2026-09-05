@@ -214,7 +214,7 @@ class WCAF_Settings {
 		}
 
 		if ( 'detection' === $tab ) {
-			$output['detection_mode']            = ( isset( $input['detection_mode'] ) && 'monitor' === $input['detection_mode'] ) ? 'monitor' : 'block';
+			$output['detection_mode']            = ( isset( $input['detection_mode'] ) && 'block' === $input['detection_mode'] ) ? 'block' : 'monitor';
 			$output['enable_unknown_origin']     = ! empty( $input['enable_unknown_origin'] ) ? 1 : 0;
 			$output['enable_stripe_decline']     = ! empty( $input['enable_stripe_decline'] ) ? 1 : 0;
 			$output['enable_linked_fraud']       = ! empty( $input['enable_linked_fraud'] ) ? 1 : 0;
@@ -704,7 +704,7 @@ class WCAF_Settings {
 
 	public static function field_detection_mode() {
 		$o    = self::opt();
-		$mode = $o['detection_mode'] ?? 'block';
+		$mode = $o['detection_mode'] ?? 'monitor';
 		printf(
 			'<fieldset>
 				<label><input name="%1$s[detection_mode]" type="radio" value="block" %2$s /> %3$s</label><br />
