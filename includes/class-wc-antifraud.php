@@ -157,7 +157,7 @@ class WC_Antifraud {
 	 */
 	public static function get_default_options() {
 		return [
-			'detection_mode'            => 'block',
+			'detection_mode'            => 'monitor',
 			'target_amount'             => 0,
 			'amount_tolerance'          => 0.01,
 			'email_recipients'          => get_option( 'admin_email' ),

@@ -504,7 +504,7 @@ class WCAF_Fraud_Checks {
 	/**
 	 * Act on a suspicious order.
 	 *
-	 * Block mode (default): mark as fraud (status change, persistent flag,
+	 * Block mode: mark as fraud (status change, persistent flag,
 	 * AbuseIPDB report), alert, fire the extension hook.
 	 * Monitor mode: flag the order and note the reasons WITHOUT changing its
 	 * status or reporting the IP, alert, fire the extension hook.

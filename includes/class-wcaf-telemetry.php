@@ -135,7 +135,7 @@ class WCAF_Telemetry {
 			'hpos'                => (bool) $hpos,
 			'block_checkout'      => (bool) $block_checkout,
 			'attribution'         => (bool) WCAF_Helpers::order_attribution_enabled(),
-			'detection_mode'      => (string) ( $opts['detection_mode'] ?? 'block' ),
+			'detection_mode'      => (string) ( $opts['detection_mode'] ?? 'monitor' ),
 			'rules'               => $rules,
 			'cloudflare_ranges'   => WCAF_Client_IP::cloudflare_ranges_fetched_at() > 0,
 			'trusted_proxies'     => '' !== trim( (string) ( $opts['trusted_proxies'] ?? '' ) ),

@@ -230,7 +230,7 @@ class WCAF_Helpers {
 	 * @return bool
 	 */
 	public static function is_monitor_mode( $opts ) {
-		return 'monitor' === ( $opts['detection_mode'] ?? 'block' );
+		return 'monitor' === ( $opts['detection_mode'] ?? 'monitor' );
 	}
 
 	/**
