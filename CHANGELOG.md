@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-09-05
+
 ### Changed
 - **New installs start in Monitor mode.** The settings screen and README already told new stores to begin there, but activation defaulted to Block, so a fresh install with the default rules could move genuine orders into a fraud status before the merchant had seen a single detection. Existing stores keep the mode they had: a one-time upgrade step (`wcaf_options_schema_version` = 1, run on init and before activation merges defaults) pins `detection_mode` to Block on any install whose stored options never carried the key, because only saving the Detection tab writes it. (#7)
 
