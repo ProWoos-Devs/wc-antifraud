@@ -179,9 +179,9 @@ class WCAF_Settings {
 		add_settings_field( 'email_recipients', __( 'Alert email recipients', 'wc-antifraud' ), [ __CLASS__, 'field_recipients' ], 'wc-antifraud', 'wcaf_notif' );
 
 		add_settings_section( 'wcaf_privacy', __( 'Privacy', 'wc-antifraud' ), function () {
-			echo '<p>' . esc_html__( 'Anonymous usage reports help tune the default rules from real stores. Nothing is sent without your consent, and never emails, IP addresses, order details, your site address, or any user data.', 'wc-antifraud' ) . '</p>';
+			echo '<p>' . esc_html__( 'Opt-in usage reports help tune the default rules from real stores. The report payload never contains emails, IP addresses, order details, your site address, or any user data.', 'wc-antifraud' ) . '</p>';
 		}, 'wc-antifraud' );
-		add_settings_field( 'telemetry_consent', __( 'Anonymous usage reports', 'wc-antifraud' ), [ __CLASS__, 'field_telemetry' ], 'wc-antifraud', 'wcaf_privacy' );
+		add_settings_field( 'telemetry_consent', __( 'Usage reports', 'wc-antifraud' ), [ __CLASS__, 'field_telemetry' ], 'wc-antifraud', 'wcaf_privacy' );
 	}
 
 	/**
@@ -346,8 +346,8 @@ class WCAF_Settings {
 			'proxy_dismissed' => __( 'Noted. That address will not be reported as a proxy for 30 days.', 'wc-antifraud' ),
 			'cf_refreshed'   => __( 'Cloudflare IP ranges refreshed.', 'wc-antifraud' ),
 			'cf_refresh_failed' => __( 'Cloudflare IP ranges could not be fetched; the previous set is still in use.', 'wc-antifraud' ),
-			'telemetry_on'   => __( 'Thank you. Anonymous usage reports are on; the first one goes out with the next daily run.', 'wc-antifraud' ),
-			'telemetry_off'  => __( 'Anonymous usage reports are off.', 'wc-antifraud' ),
+			'telemetry_on'   => __( 'Thank you. Usage reports are on; the first one goes out with the next daily run.', 'wc-antifraud' ),
+			'telemetry_off'  => __( 'Usage reports are off.', 'wc-antifraud' ),
 			'telemetry_sent' => __( 'Report sent.', 'wc-antifraud' ),
 			'telemetry_failed' => __( 'The report could not be sent (consent missing, or the receiver did not answer 200). See the status line under Privacy.', 'wc-antifraud' ),
 			'telemetry_deleted' => __( 'The receiver confirmed the deletion. Reports are off and the install ID was removed.', 'wc-antifraud' ),
@@ -1040,10 +1040,10 @@ class WCAF_Settings {
 			'<fieldset><label><input name="%1$s[telemetry_consent]" type="radio" value="yes" %2$s /> %3$s</label><br /><label><input name="%1$s[telemetry_consent]" type="radio" value="no" %4$s /> %5$s</label></fieldset><p class="description">%6$s</p><ul class="description" style="list-style:disc;margin-left:20px;">%7$s</ul>',
 			esc_attr( self::key() ),
 			checked( 'yes', $consent, false ),
-			esc_html__( 'Send an anonymous report once a day', 'wc-antifraud' ),
+			esc_html__( 'Send an opt-in usage report once a day', 'wc-antifraud' ),
 			checked( 'yes' === $consent ? 'yes' : 'no', 'no', false ),
-			esc_html__( 'Do not send anything', 'wc-antifraud' ),
-			esc_html__( 'A report contains only:', 'wc-antifraud' ),
+			esc_html__( 'Do not send usage reports', 'wc-antifraud' ),
+			esc_html__( 'The report payload contains only:', 'wc-antifraud' ),
 			$items // already escaped
 		);
 		$status = WCAF_Telemetry::status();

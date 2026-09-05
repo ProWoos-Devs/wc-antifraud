@@ -12,6 +12,18 @@ if ( ! defined( 'ABSPATH' ) ) {
 class WCAF_Helpers {
 
 	/**
+	 * User-Agent for outbound requests that does not expose the site URL.
+	 *
+	 * WordPress's default HTTP User-Agent contains home_url(), so every external
+	 * request made by the plugin must override it explicitly.
+	 *
+	 * @return string
+	 */
+	public static function outbound_user_agent() {
+		return 'WC-Antifraud/' . WCAF_VERSION . ' WordPress/' . get_bloginfo( 'version' );
+	}
+
+	/**
 	 * Get the client IP for the current request.
 	 *
 	 * Trusted-proxy model since 1.7.0, see WCAF_Client_IP.

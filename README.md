@@ -56,10 +56,12 @@
 
 ## Privacy
 
-WC Antifraud sends nothing anywhere by default. Two features contact outside services, both opt-in:
+WC Antifraud makes two automatic maintenance requests: it checks GitHub for plugin releases (cached for 12 hours) and refreshes Cloudflare's published IP ranges daily. Those requests contain no order or customer data. The plugin overrides WordPress's default HTTP User-Agent so the site URL is not sent; as with any network request, the destination can still observe the server's source IP.
 
-- **AbuseIPDB reporting** (Reports tab) sends the IP, the detection reasons, and the order timestamp of orders marked as fraud to abuseipdb.com. Never customer data.
-- **Anonymous usage reports** (Notifications > Privacy, asked once after activation) send one report a day to prowoos.com containing only: a random install ID (never your site address); plugin, WordPress, WooCommerce, and PHP versions and the site locale; whether HPOS, the Block Checkout, and Order Attribution are in use; which rules are on and the detection mode; whether Cloudflare or a proxy was detected; and yesterday's event counts (orders marked by reason, monitor flags, checkouts refused by reason, REST blocks, repeated-failure alerts, auto-bans, bans lifted by hand, "Block this customer" uses, fraud orders un-marked by an admin). Never emails, IP addresses, order details, URLs, or user data. You can stop at any time, and "Delete my data" asks the receiver to remove everything stored for your install ID.
+Two optional features send data to outside services:
+
+- **AbuseIPDB reporting** (Reports tab) sends the customer's IP, the detection reasons, and the order timestamp of orders marked as fraud to abuseipdb.com. It never sends names, contact details, or order contents.
+- **Usage reports** (Notifications > Privacy, asked once after activation) send one pseudonymous report a day to prowoos.com containing only: a random install ID (never your site address); plugin, WordPress, WooCommerce, and PHP versions and the site locale; whether HPOS, the Block Checkout, and Order Attribution are in use; which rules are on and the detection mode; whether Cloudflare or a proxy was detected; and yesterday's event counts (orders marked by reason, monitor flags, checkouts refused by reason, REST blocks, repeated-failure alerts, auto-bans, bans lifted by hand, "Block this customer" uses, fraud orders un-marked by an admin). The report payload never contains emails, IP addresses, order details, URLs, or user data. You can stop at any time, and "Delete my data" asks the receiver to remove everything stored for your install ID.
 
 ## Requirements
 
