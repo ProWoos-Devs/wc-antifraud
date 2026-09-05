@@ -76,18 +76,10 @@ class WCAF_REST_Hardening {
 			return new WP_Error( self::ERROR_CODE, __( 'Order creation via REST API is not permitted.', 'wc-antifraud' ), [ 'status' => 403 ] );
 		}
 
-		// Allow authenticated admin users
+		// WooCommerce authenticates valid REST API credentials before dispatch and
+		// sets the current user. Do not trust the mere presence of credential-like
+		// parameters or headers: an attacker can supply arbitrary values.
 		if ( current_user_can( 'manage_woocommerce' ) ) {
-			return $result;
-		}
-
-		// Allow WC API key auth
-		if ( ! empty( $request->get_param( 'consumer_key' ) ) ) {
-			return $result;
-		}
-
-		// Allow OAuth / Bearer auth (WC REST API, webhooks)
-		if ( ! empty( $request->get_header( 'authorization' ) ) ) {
 			return $result;
 		}
 
