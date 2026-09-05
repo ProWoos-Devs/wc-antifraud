@@ -182,7 +182,7 @@ class WCAF_GitHub_Updater {
 			'timeout' => 15,
 			'headers' => [
 				'Accept'     => 'application/vnd.github.v3+json',
-				'User-Agent' => 'WC-Antifraud/' . WCAF_VERSION . ' WordPress/' . get_bloginfo( 'version' ),
+				'User-Agent' => WCAF_Helpers::outbound_user_agent(),
 			],
 		] );
 

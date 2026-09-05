@@ -1,6 +1,6 @@
 <?php
 /**
- * Opt-in anonymous usage reports.
+ * Opt-in usage reports.
  *
  * Nothing is sent until an administrator has said yes. The report is keyed by
  * a random install ID generated at consent time, never by the site URL, and
@@ -161,7 +161,10 @@ class WCAF_Telemetry {
 		}
 		$response = wp_remote_post( self::endpoint(), [
 			'timeout' => 10,
-			'headers' => [ 'Content-Type' => 'application/json' ],
+			'headers' => [
+				'Content-Type' => 'application/json',
+				'User-Agent'   => WCAF_Helpers::outbound_user_agent(),
+			],
 			'body'    => wp_json_encode( [
 				'install_id' => $id,
 				'plugin'     => self::PLUGIN_SLUG,
@@ -191,7 +194,10 @@ class WCAF_Telemetry {
 		if ( '' !== $id ) {
 			$response = wp_remote_post( self::endpoint(), [
 				'timeout' => 10,
-				'headers' => [ 'Content-Type' => 'application/json' ],
+				'headers' => [
+					'Content-Type' => 'application/json',
+					'User-Agent'   => WCAF_Helpers::outbound_user_agent(),
+				],
 				'body'    => wp_json_encode( [ 'install_id' => $id, 'plugin' => self::PLUGIN_SLUG, 'delete' => true ] ),
 			] );
 			$ok = ! is_wp_error( $response ) && 200 === (int) wp_remote_retrieve_response_code( $response );
@@ -238,11 +244,11 @@ class WCAF_Telemetry {
 		printf(
 			'<div class="notice notice-info"><p><strong>%s</strong> %s</p><ul style="list-style:disc;margin-left:20px;">%s</ul><p>%s</p><p><a class="button button-primary" href="%s">%s</a> <a class="button" href="%s">%s</a></p></div>',
 			esc_html__( 'WC Antifraud: help improve the plugin?', 'wc-antifraud' ),
-			esc_html__( 'Once a day the plugin can send an anonymous report to prowoos.com. It contains only:', 'wc-antifraud' ),
+			esc_html__( 'Once a day the plugin can send an opt-in usage report to prowoos.com. Its payload contains only:', 'wc-antifraud' ),
 			$items, // already escaped
 			esc_html__( 'Never emails, IP addresses, order details, your site address, or any user data. You can change your mind or delete the data at any time under Antifraud > Notifications > Privacy.', 'wc-antifraud' ),
 			esc_url( $yes ),
-			esc_html__( 'Allow anonymous usage data', 'wc-antifraud' ),
+			esc_html__( 'Allow usage data', 'wc-antifraud' ),
 			esc_url( $no ),
 			esc_html__( 'No thanks', 'wc-antifraud' )
 		);

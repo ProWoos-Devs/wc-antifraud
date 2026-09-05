@@ -103,8 +103,9 @@ class WCAF_AbuseIPDB {
 			[
 				'timeout' => 10,
 				'headers' => [
-					'Key'    => $opts['abuseipdb_api_key'],
-					'Accept' => 'application/json',
+					'Key'        => $opts['abuseipdb_api_key'],
+					'Accept'     => 'application/json',
+					'User-Agent' => WCAF_Helpers::outbound_user_agent(),
 				],
 				'body'    => [
 					'ip'         => $ip,

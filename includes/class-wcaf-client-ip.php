@@ -308,7 +308,10 @@ class WCAF_Client_IP {
 	public static function refresh_cloudflare_ranges() {
 		$ranges = [];
 		foreach ( [ self::CF_URL_V4, self::CF_URL_V6 ] as $url ) {
-			$response = wp_remote_get( $url, [ 'timeout' => 10 ] );
+			$response = wp_remote_get( $url, [
+				'timeout' => 10,
+				'headers' => [ 'User-Agent' => WCAF_Helpers::outbound_user_agent() ],
+			] );
 			if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
 				return false;
 			}
