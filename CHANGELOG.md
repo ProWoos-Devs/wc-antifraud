@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-09-05
+
+First release assembled from reviewed Codex pull requests (#2, #3, #4, #5, #6, #8).
+
+### Fixed
+- **Fraud orders were invisible on the HPOS Orders list.** WooCommerce only stores a custom status with the `wc-` prefix when the prefixed name is a registered post status, and the HPOS list only shows statuses that are both in `wc_order_statuses()` and registered, so the plugin's unprefixed registration hid every fraud order there. The statuses are now registered and stored as `wc-fraud-auto` ("Auto Cancelled") and `wc-fraud-stripe` ("Cancelled by Stripe"), within the 20-character status limit. A one-time migration on the first request after updating rewrites the old `fraud-auto-cancelled` / `fraud-stripe` values in `wp_posts` and, when present, the HPOS tables, backfills the persistent fraud flag, and clears the caches; it uses direct SQL, so no status-change hooks, notes, or emails fire. The combined "Fraud" view now exists on the HPOS list as well, the Activity Log and Reports read whichever order store is authoritative, refunded fraud orders count in the Reports totals, and alert emails link to the HPOS-aware edit screen. The usage-report counter key moves from `marked:fraud-auto-cancelled` to `marked:fraud-auto`. (#5)
+- **REST hardening no longer trusts credential-like input.** A `consumer_key` parameter or an `Authorization` header used to skip the plugin's gate by mere presence. Only a request WooCommerce has actually authenticated as a user with `manage_woocommerce`, or one carrying a valid Store API nonce, passes now. WooCommerce's own permission check already refused fake credentials, so the change hardens the plugin's layer rather than closing an order-creation hole. API keys owned by users without `manage_woocommerce` are now refused by the gate. (#3)
+- **Repeated payment failures are counted over a true rolling 24 hours.** Each failure keeps its own timestamp and drops out on its own; before, the whole cluster lived on as long as the latest failure was under a day old, so one failure every 23 hours accumulated forever. Existing clusters keep their count for one more window from their last failure. (#4)
+- **IP repeat tracking no longer grows without bound.** Each IP now has its own expiring transient instead of one ever-growing option that was rewritten on every order; the old `wcaf_ip_store` option is removed on first use. The window and threshold are clamped to the bounds the settings screen already enforces. (#6)
+- **Post-payment rules never fall back to the request IP.** An order without a stored customer IP now yields no IP at all instead of the current request's, which inside a gateway webhook or an admin action was the gateway's or the admin's address. (#6)
+- **`wcaf_suspicious_order_detected` always receives three arguments.** Stripe verdicts passed two; they now pass `false` as the monitor flag. (#8)
+
+### Changed
+- Every outbound request (GitHub release check, Cloudflare range refresh, usage reports, AbuseIPDB) sends a `WC-Antifraud/<version> WordPress/<version>` User-Agent. WordPress's default agent carries the site URL, which contradicted the usage-report promise. The README now separates the two automatic maintenance requests from the two opt-in data-sharing features and calls the usage reports pseudonymous, since the install ID persists. (#2)
+
 ## [1.9.0] - 2026-09-04
 
 ### Added

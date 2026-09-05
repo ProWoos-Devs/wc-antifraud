@@ -25,10 +25,9 @@ class WCAF_Order_Status {
 	/**
 	 * Database values written by versions through 1.9.0.
 	 */
-	const LEGACY_STATUS_SLUG      = 'fraud-auto-cancelled';
-	const LEGACY_TRUNCATED_WC_KEY = 'wc-fraud-auto-cance';
-	const STATUS_SCHEMA_OPTION    = 'wcaf_order_status_schema_version';
-	const STATUS_SCHEMA_VERSION   = 2;
+	const LEGACY_STATUS_SLUG    = 'fraud-auto-cancelled';
+	const STATUS_SCHEMA_OPTION  = 'wcaf_order_status_schema_version';
+	const STATUS_SCHEMA_VERSION = 2;
 
 	/**
 	 * Internal status slug for orders whose fraud verdict came from Stripe itself
@@ -233,7 +232,7 @@ class WCAF_Order_Status {
 	 * @return array
 	 */
 	public static function fraud_statuses() {
-		return [ self::STATUS_SLUG, self::STRIPE_STATUS_SLUG, self::LEGACY_STATUS_SLUG, substr( self::LEGACY_TRUNCATED_WC_KEY, 3 ) ];
+		return [ self::STATUS_SLUG, self::STRIPE_STATUS_SLUG, self::LEGACY_STATUS_SLUG ];
 	}
 
 	/**
@@ -248,7 +247,6 @@ class WCAF_Order_Status {
 			self::STATUS_SLUG,
 			self::STRIPE_STATUS_SLUG,
 			self::LEGACY_STATUS_SLUG,
-			self::LEGACY_TRUNCATED_WC_KEY,
 		];
 	}
 
@@ -308,6 +306,11 @@ class WCAF_Order_Status {
 			if ( function_exists( 'wc_delete_shop_order_transients' ) ) {
 				wc_delete_shop_order_transients( $order_id );
 			}
+			// The direct SQL bypassed the data store, so a persistent object
+			// cache would keep serving the old status until eviction.
+			if ( function_exists( 'wc_get_container' ) && class_exists( '\\Automattic\\WooCommerce\\Caches\\OrderCache' ) ) {
+				wc_get_container()->get( \Automattic\WooCommerce\Caches\OrderCache::class )->remove( $order_id );
+			}
 		}
 
 		if ( $success ) {
@@ -341,7 +344,7 @@ class WCAF_Order_Status {
 	private static function migrate_status_store( $orders_table, $type_column, $status_column, $id_column, $meta_table, $meta_id, &$ids ) {
 		global $wpdb;
 
-		$source_statuses = [ self::LEGACY_STATUS_SLUG, self::LEGACY_TRUNCATED_WC_KEY, self::STATUS_SLUG, self::STRIPE_STATUS_SLUG ];
+		$source_statuses = [ self::LEGACY_STATUS_SLUG, self::STATUS_SLUG, self::STRIPE_STATUS_SLUG ];
 		$placeholders    = implode( ', ', array_fill( 0, count( $source_statuses ), '%s' ) );
 		$sql             = $wpdb->prepare(
 			// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- identifiers are trusted literals.
@@ -356,10 +359,9 @@ class WCAF_Order_Status {
 		}
 
 		$mappings = [
-			self::LEGACY_STATUS_SLUG      => self::STATUS_WC_KEY,
-			self::LEGACY_TRUNCATED_WC_KEY => self::STATUS_WC_KEY,
-			self::STATUS_SLUG             => self::STATUS_WC_KEY,
-			self::STRIPE_STATUS_SLUG      => self::STRIPE_STATUS_WC_KEY,
+			self::LEGACY_STATUS_SLUG => self::STATUS_WC_KEY,
+			self::STATUS_SLUG        => self::STATUS_WC_KEY,
+			self::STRIPE_STATUS_SLUG => self::STRIPE_STATUS_WC_KEY,
 		];
 		$success  = true;
 		foreach ( $mappings as $from => $to ) {

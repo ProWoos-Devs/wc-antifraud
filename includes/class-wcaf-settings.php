@@ -1009,7 +1009,7 @@ class WCAF_Settings {
 			'<fieldset><label><input name="%1$s[telemetry_consent]" type="radio" value="yes" %2$s /> %3$s</label><br /><label><input name="%1$s[telemetry_consent]" type="radio" value="no" %4$s /> %5$s</label></fieldset><p class="description">%6$s</p><ul class="description" style="list-style:disc;margin-left:20px;">%7$s</ul>',
 			esc_attr( self::key() ),
 			checked( 'yes', $consent, false ),
-			esc_html__( 'Send an opt-in usage report once a day', 'wc-antifraud' ),
+			esc_html__( 'Send a usage report once a day', 'wc-antifraud' ),
 			checked( 'yes' === $consent ? 'yes' : 'no', 'no', false ),
 			esc_html__( 'Do not send usage reports', 'wc-antifraud' ),
 			esc_html__( 'The report payload contains only:', 'wc-antifraud' ),

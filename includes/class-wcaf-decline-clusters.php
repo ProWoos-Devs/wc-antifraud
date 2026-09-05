@@ -339,8 +339,8 @@ class WCAF_Decline_Clusters {
 	/**
 	 * Read the store, dropping individual failures that have aged out of the
 	 * window. Older plugin versions stored only an aggregate count and cannot
-	 * prove when each failure occurred; preserve its latest failure as one event
-	 * rather than carrying a potentially stale block forward.
+	 * prove when each failure occurred; treat every failure as if it happened
+	 * at the last one, so an upgrade never resets a cluster mid-attack.
 	 *
 	 * @param int $now
 	 * @return array
@@ -364,8 +364,11 @@ class WCAF_Decline_Clusters {
 				} ) );
 				sort( $events, SORT_NUMERIC );
 			} else {
+				// Legacy aggregate row (through 1.9.0): keep its count alive for
+				// one more window from the last failure, then let it decay.
 				$last   = (int) $row['last'];
-				$events = $last >= $cutoff && $last <= $now ? [ $last ] : [];
+				$count  = max( 1, (int) ( $row['failures'] ?? 1 ) );
+				$events = $last >= $cutoff && $last <= $now ? array_fill( 0, $count, $last ) : [];
 			}
 
 			if ( empty( $events ) ) {
