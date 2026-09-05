@@ -390,7 +390,7 @@ class WCAF_Stripe_Decline {
 			WCAF_Order_Status::STRIPE_STATUS_SLUG
 		);
 		WCAF_Email_Alerts::send_alert( $order, [ $reason ], $opts );
-		do_action( 'wcaf_suspicious_order_detected', $order, [ $reason ] );
+		do_action( 'wcaf_suspicious_order_detected', $order, [ $reason ], false );
 	}
 
 	/**

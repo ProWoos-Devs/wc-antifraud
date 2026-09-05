@@ -47,7 +47,7 @@
 - Stripe decline intelligence - failed Stripe payments get the real decline reason (Radar block, risk level, decline code, card) as an order note, order meta, and a panel on the order screen with a direct Stripe Dashboard link; Radar-blocked / issuer-fraud-declined orders are auto-marked as fraud (no AbuseIPDB reporting for gateway verdicts)
 - Email alerts with order details and fraud indicators
 - AbuseIPDB reporting - opt-in reporting of fraud-order IPs to the [AbuseIPDB](https://www.abuseipdb.com/) community database (categories: Fraud Orders + Web App Attack), no customer PII ever included
-- `wcaf_suspicious_order_detected` and `wcaf_ip_auto_banned` action hooks for extensibility
+- `wcaf_suspicious_order_detected` and `wcaf_ip_auto_banned` action hooks for extensibility. The suspicious-order hook receives the `WC_Order`, an array of reason labels, and a boolean that is `true` only for monitor-mode detections
 
 ### Settings & Reporting
 - Tabbed settings UI: Detection Rules, Lists, Notifications, Activity Log, Reports
