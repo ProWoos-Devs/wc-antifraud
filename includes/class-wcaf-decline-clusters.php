@@ -68,6 +68,13 @@ class WCAF_Decline_Clusters {
 	 */
 	const MAX_TRACKED = 500;
 
+	/**
+	 * Bound one visitor's timestamp list. The settings UI caps the blocking
+	 * threshold at 100, so retaining twice that is sufficient for enforcement
+	 * and keeps a sustained attack from growing the option without limit.
+	 */
+	const MAX_EVENTS_PER_KEY = 200;
+
 	public static function init() {
 		add_action( 'woocommerce_order_status_failed', [ __CLASS__, 'record_failed_order' ], 10, 2 );
 
@@ -170,13 +177,20 @@ class WCAF_Decline_Clusters {
 			return;
 		}
 
-		$now      = time();
-		$clusters = self::load( $now );
+		$now         = time();
+		$clusters    = self::load( $now );
+		$event_limit = max( self::MAX_EVENTS_PER_KEY, self::block_threshold() );
 		foreach ( $keys as $key ) {
-			$existing         = $clusters[ $key ] ?? [ 'failures' => 0, 'first' => $now ];
+			$existing = $clusters[ $key ] ?? [ 'events' => [] ];
+			$events   = isset( $existing['events'] ) && is_array( $existing['events'] ) ? $existing['events'] : [];
+			$events[] = $now;
+			if ( count( $events ) > $event_limit ) {
+				$events = array_slice( $events, -$event_limit );
+			}
 			$clusters[ $key ] = [
-				'failures' => (int) $existing['failures'] + 1,
-				'first'    => (int) $existing['first'],
+				'events'   => $events,
+				'failures' => count( $events ),
+				'first'    => (int) reset( $events ),
 				'last'     => $now,
 			];
 			if ( self::ALERT_FROM === $clusters[ $key ]['failures'] ) {
@@ -323,7 +337,10 @@ class WCAF_Decline_Clusters {
 	// ── Storage ───────────────────────────────────────────────────────
 
 	/**
-	 * Read the store, dropping anything that has aged out of the window.
+	 * Read the store, dropping individual failures that have aged out of the
+	 * window. Older plugin versions stored only an aggregate count and cannot
+	 * prove when each failure occurred; preserve its latest failure as one event
+	 * rather than carrying a potentially stale block forward.
 	 *
 	 * @param int $now
 	 * @return array
@@ -333,18 +350,35 @@ class WCAF_Decline_Clusters {
 		if ( ! is_array( $stored ) ) {
 			return [];
 		}
-		$live = [];
+		$live        = [];
+		$cutoff      = $now - self::WINDOW;
+		$event_limit = max( self::MAX_EVENTS_PER_KEY, self::block_threshold() );
 		foreach ( $stored as $key => $row ) {
 			if ( ! is_array( $row ) || ! isset( $row['last'] ) ) {
 				continue;
 			}
-			if ( ( $now - (int) $row['last'] ) > self::WINDOW ) {
+
+			if ( isset( $row['events'] ) && is_array( $row['events'] ) ) {
+				$events = array_values( array_filter( array_map( 'intval', $row['events'] ), function ( $timestamp ) use ( $cutoff, $now ) {
+					return $timestamp >= $cutoff && $timestamp <= $now;
+				} ) );
+				sort( $events, SORT_NUMERIC );
+			} else {
+				$last   = (int) $row['last'];
+				$events = $last >= $cutoff && $last <= $now ? [ $last ] : [];
+			}
+
+			if ( empty( $events ) ) {
 				continue;
 			}
+			if ( count( $events ) > $event_limit ) {
+				$events = array_slice( $events, -$event_limit );
+			}
 			$live[ (string) $key ] = [
-				'failures' => (int) ( $row['failures'] ?? 0 ),
-				'first'    => (int) ( $row['first'] ?? $row['last'] ),
-				'last'     => (int) $row['last'],
+				'events'   => $events,
+				'failures' => count( $events ),
+				'first'    => (int) reset( $events ),
+				'last'     => (int) end( $events ),
 			];
 		}
 		return $live;
