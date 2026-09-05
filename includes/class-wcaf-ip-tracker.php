@@ -11,7 +11,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class WCAF_IP_Tracker {
 
+	/**
+	 * Legacy option used through 1.9.0. It held every tracked IP in one row.
+	 */
 	const IP_STORE_KEY = 'wcaf_ip_store';
+
+	/**
+	 * Each IP now gets an independently expiring, hashed transient.
+	 */
+	const TRANSIENT_PREFIX = 'wcaf_ip_repeat_';
 
 	/**
 	 * Track order and check threshold
@@ -25,27 +33,32 @@ class WCAF_IP_Tracker {
 		if ( empty( $ip ) || empty( $order_id ) ) {
 			return false;
 		}
-		$store     = get_option( self::IP_STORE_KEY, [] );
-		$window    = intval( $opts['ip_repeat_window'] ?? 3600 );
-		$threshold = intval( $opts['ip_repeat_threshold'] ?? 3 );
+		$window    = min( DAY_IN_SECONDS, max( MINUTE_IN_SECONDS, absint( $opts['ip_repeat_window'] ?? HOUR_IN_SECONDS ) ) );
+		$threshold = min( 100, max( 1, absint( $opts['ip_repeat_threshold'] ?? 3 ) ) );
 		$now       = time();
+		$key       = self::transient_key( $ip );
+		$stored    = get_transient( $key );
 
-		if ( ! isset( $store[ $ip ] ) || ! is_array( $store[ $ip ] ) ) {
-			$store[ $ip ] = [];
+		if ( ! is_array( $stored ) ) {
+			$stored = [];
 		}
 
 		// Filter to recent entries
 		$entries = [];
-		foreach ( $store[ $ip ] as $e ) {
-			if ( isset( $e['time'] ) && ( $now - intval( $e['time'] ) ) <= $window ) {
-				$entries[] = $e;
+		foreach ( $stored as $entry ) {
+			$timestamp = isset( $entry['time'] ) ? (int) $entry['time'] : 0;
+			if ( $timestamp >= ( $now - $window ) && $timestamp <= $now && ! empty( $entry['order_id'] ) ) {
+				$entries[] = [
+					'order_id' => (int) $entry['order_id'],
+					'time'     => $timestamp,
+				];
 			}
 		}
 
 		// Add this order if not already tracked
 		$exists = false;
-		foreach ( $entries as $e ) {
-			if ( isset( $e['order_id'] ) && $e['order_id'] == $order_id ) {
+		foreach ( $entries as $entry ) {
+			if ( (int) $entry['order_id'] === (int) $order_id ) {
 				$exists = true;
 				break;
 			}
@@ -54,43 +67,43 @@ class WCAF_IP_Tracker {
 			$entries[] = [ 'order_id' => $order_id, 'time' => $now ];
 		}
 
-		$store[ $ip ] = $entries;
-		update_option( self::IP_STORE_KEY, $store );
+		set_transient( $key, $entries, $window );
+
+		// Drop the old all-IPs option on first use after upgrading. Retaining its
+		// aggregate history would keep the original unbounded row alive. Starting
+		// fresh with this order is the safe, fail-open migration.
+		if ( false !== get_option( self::IP_STORE_KEY, false ) ) {
+			delete_option( self::IP_STORE_KEY );
+		}
 
 		return count( $entries ) >= $threshold;
 	}
 
+	/**
+	 * @param string $ip Customer IP.
+	 * @return string
+	 */
+	private static function transient_key( $ip ) {
+		return self::TRANSIENT_PREFIX . hash( 'sha256', (string) $ip );
+	}
+
 	public static function initialize() {
-		if ( false === get_option( self::IP_STORE_KEY ) ) {
-			update_option( self::IP_STORE_KEY, [] );
-		}
+		delete_option( self::IP_STORE_KEY );
 	}
 
 	/**
 	 * Clean up old data
 	 *
-	 * @param int $max_age Seconds (default 7 days)
-	 * @return int IPs cleaned
+	 * Per-IP transients expire on their own. This only removes the legacy global
+	 * option left by versions through 1.9.0.
+	 *
+	 * @param int $max_age Unused; retained for backward compatibility.
+	 * @return int Whether a legacy store was removed.
 	 */
 	public static function cleanup_old_data( $max_age = 604800 ) {
-		$store   = get_option( self::IP_STORE_KEY, [] );
-		$now     = time();
-		$cleaned = 0;
-		foreach ( $store as $ip => $entries ) {
-			$recent = [];
-			foreach ( $entries as $e ) {
-				if ( isset( $e['time'] ) && ( $now - intval( $e['time'] ) ) <= $max_age ) {
-					$recent[] = $e;
-				}
-			}
-			if ( empty( $recent ) ) {
-				unset( $store[ $ip ] );
-				$cleaned++;
-			} else {
-				$store[ $ip ] = $recent;
-			}
-		}
-		update_option( self::IP_STORE_KEY, $store );
-		return $cleaned;
+		unset( $max_age );
+		$legacy = get_option( self::IP_STORE_KEY, false );
+		delete_option( self::IP_STORE_KEY );
+		return is_array( $legacy ) ? count( $legacy ) : 0;
 	}
 }
