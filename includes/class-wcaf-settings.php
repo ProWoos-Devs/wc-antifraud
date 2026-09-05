@@ -559,27 +559,7 @@ class WCAF_Settings {
 	// ── Activity Log ──────────────────────────────────────────────────
 
 	private static function render_activity_log() {
-		// Use direct SQL to avoid WC object cache returning stale/wrong status orders.
-		global $wpdb;
-		$fraud_ids = $wpdb->get_col(
-			"SELECT ID FROM {$wpdb->posts}
-			 WHERE post_type = 'shop_order'
-			 AND post_status IN ('fraud-auto-cancelled','fraud-stripe')
-			 ORDER BY post_date DESC
-			 LIMIT 50"
-		);
-		// Orders flagged in monitor mode keep their normal status, so they are
-		// found through the flag meta instead.
-		$flagged_ids = $wpdb->get_col( $wpdb->prepare(
-			"SELECT p.ID FROM {$wpdb->posts} p
-			 INNER JOIN {$wpdb->postmeta} m ON m.post_id = p.ID AND m.meta_key = %s AND m.meta_value = 'yes'
-			 WHERE p.post_type = 'shop_order'
-			 AND p.post_status NOT IN ('trash','fraud-auto-cancelled','fraud-stripe')
-			 ORDER BY p.post_date DESC
-			 LIMIT 50",
-			WCAF_Order_Status::MONITOR_FLAG_META
-		) );
-		$orders = array_filter( array_map( 'wc_get_order', array_unique( array_merge( $fraud_ids, $flagged_ids ) ) ) );
+		$orders = array_filter( array_map( 'wc_get_order', WCAF_Order_Status::recent_detection_order_ids( 50 ) ) );
 		usort( $orders, function ( $a, $b ) {
 			$da = $a->get_date_created() ? $a->get_date_created()->getTimestamp() : 0;
 			$db = $b->get_date_created() ? $b->get_date_created()->getTimestamp() : 0;
@@ -636,24 +616,13 @@ class WCAF_Settings {
 
 		$periods = [ '7' => __( 'Last 7 days', 'wc-antifraud' ), '30' => __( 'Last 30 days', 'wc-antifraud' ), '90' => __( 'Last 90 days', 'wc-antifraud' ), '365' => __( 'Last year', 'wc-antifraud' ) ];
 
-		global $wpdb;
-		$date_sql = $wpdb->prepare( '%s', $date_after . ' 00:00:00' );
-
-		$fraud_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('fraud-auto-cancelled','fraud-stripe') AND post_date >= {$date_sql}" );
-		$legit_count  = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-processing','wc-completed','wc-on-hold') AND post_date >= {$date_sql}" );
-		$failed_count = (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type='shop_order' AND post_status IN ('wc-failed','wc-cancelled') AND post_date >= {$date_sql}" );
+		$since_gmt    = $date_after . ' 00:00:00';
+		$fraud_count  = WCAF_Order_Status::count_fraud_orders( $since_gmt );
+		$legit_count  = WCAF_Order_Status::count_orders_by_status( [ 'wc-processing', 'wc-completed', 'wc-on-hold' ], $since_gmt );
+		$failed_count = WCAF_Order_Status::count_orders_by_status( [ 'wc-failed', 'wc-cancelled' ], $since_gmt );
 		$total_count  = $fraud_count + $legit_count + $failed_count;
 
-		// Get fraud order details via direct SQL (avoids WC object cache returning wrong orders)
-		$fraud_order_ids = $wpdb->get_col( $wpdb->prepare(
-			"SELECT ID FROM {$wpdb->posts}
-			 WHERE post_type = 'shop_order'
-			 AND post_status IN ('fraud-auto-cancelled','fraud-stripe')
-			 AND post_date >= %s
-			 ORDER BY post_date DESC
-			 LIMIT 100",
-			$date_after . ' 00:00:00'
-		) );
+		$fraud_order_ids = WCAF_Order_Status::recent_fraud_order_ids( $since_gmt, 100 );
 		$fraud_orders = array_filter( array_map( 'wc_get_order', $fraud_order_ids ) );
 		$reason_counts = $fraud_emails = $fraud_ips = [];
 		foreach ( $fraud_orders as $order ) {
