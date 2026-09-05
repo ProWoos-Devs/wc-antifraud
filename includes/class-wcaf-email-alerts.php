@@ -27,7 +27,8 @@ class WCAF_Email_Alerts {
 			return false;
 		}
 
-		$site    = get_bloginfo( 'name' );
+		$site     = get_bloginfo( 'name' );
+		$edit_url = $order->get_edit_order_url();
 		$subject = $monitor
 			? sprintf( '[%s — Antifraud] Suspicious order #%d flagged for review (monitor mode)', $site, $order->get_id() )
 			: sprintf( '[%s — Antifraud] Suspicious order #%d', $site, $order->get_id() );
@@ -38,7 +39,7 @@ class WCAF_Email_Alerts {
 			: __( 'A suspicious order has been detected and automatically flagged.', 'wc-antifraud' );
 		$body[] = '';
 		$body[] = __( 'ORDER DETAILS:', 'wc-antifraud' );
-		$body[] = sprintf( 'Order #: %d — %s', $order->get_id(), admin_url( 'post.php?post=' . $order->get_id() . '&action=edit' ) );
+		$body[] = sprintf( 'Order #: %d — %s', $order->get_id(), $edit_url );
 		$body[] = sprintf( 'Total: %s', html_entity_decode( wp_strip_all_tags( $order->get_formatted_order_total() ), ENT_QUOTES, 'UTF-8' ) );
 		$body[] = sprintf( 'Status: %s', wc_get_order_status_name( $order->get_status() ) );
 		$body[] = sprintf( 'Date: %s', $order->get_date_created()->date_i18n( wc_date_format() . ' ' . wc_time_format() ) );
@@ -58,7 +59,7 @@ class WCAF_Email_Alerts {
 		}
 		$body[] = '';
 		$body[] = __( 'ACTIONS:', 'wc-antifraud' );
-		$body[] = sprintf( 'View in admin: %s', admin_url( 'post.php?post=' . $order->get_id() . '&action=edit' ) );
+		$body[] = sprintf( 'View in admin: %s', $edit_url );
 		if ( $monitor ) {
 			$body[] = __( 'To cancel it as fraud, use "Change status to Fraud" on the Orders list, or switch Detection mode back to Block.', 'wc-antifraud' );
 		}
