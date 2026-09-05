@@ -269,7 +269,11 @@ class WCAF_Fraud_Checks {
 		if ( '' !== $ip && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
 			return $ip;
 		}
-		return WCAF_Helpers::get_client_ip();
+
+		// Fail open when the order has no trustworthy address. Falling back to the
+		// current request can attribute a gateway webhook or an admin action to the
+		// gateway/admin and poison IP-linked rules and third-party reports.
+		return false;
 	}
 
 	/**
