@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-09-10
+
+### Added
+- **Classic checkout lock.** A store whose checkout page renders the Block Checkout submits every order through the Store API, yet WooCommerce keeps the classic checkout's AJAX endpoints registered. A card-testing bot used exactly that legacy flow against a Block Checkout store on 2026-09-10: find the checkout page, post `wc-ajax=update_order_review`, run the card through the gateway's classic card fields, post `wc-ajax=checkout`, 59 stolen cards in 50 minutes, each from a fresh IP, so no per-IP or per-session rule could see a second attempt. Six days of access logs before it held not one request to those endpoints from a customer. The new rule (Detection Rules > Checkout Surface) answers `wc-ajax=checkout`, `wc-ajax=update_order_review` and their admin-ajax forms with HTTP 403 before any order is created or any gateway contacted, engages only while the Block Checkout is detected (WooCommerce's own `CartCheckoutUtils::is_checkout_block_default()`, so block themes are covered), lets allowlisted IPs pass, counts refusals as `refused:classic_checkout` on the Reports tab, and emails the alert recipients at most once an hour with the number of refusals since the previous mail. Customer-facing text via the `wcaf_classic_lock_message` filter. On by default for new installs; the one-time option upgrade (`wcaf_options_schema_version` = 2) pins it off on existing installs, which keep their behavior until the merchant turns it on.
+
 ## [1.11.0] - 2026-09-05
 
 ### Changed

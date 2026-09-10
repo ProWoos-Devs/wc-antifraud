@@ -1,6 +1,6 @@
 # WC Antifraud
 
-[![Version](https://img.shields.io/badge/Version-1.11.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
+[![Version](https://img.shields.io/badge/Version-1.12.0-red.svg)](https://github.com/ProWoos-Devs/wc-antifraud/releases)
 [![WordPress](https://img.shields.io/badge/WordPress-5.8+-blue.svg)](https://wordpress.org/)
 [![WooCommerce](https://img.shields.io/badge/WooCommerce-5.0+-96588a.svg)](https://woocommerce.com/)
 [![PHP Version](https://img.shields.io/badge/PHP-7.4+-purple.svg)](https://php.net/)
@@ -8,7 +8,7 @@
 
 **Multi-layer anti-fraud protection for WooCommerce.** Origin verification, repeated-payment-failure detection with optional pre-payment blocking and auto-ban, blacklists and allowlist (email, IP, phone), a bundled disposable-email list, REST API hardening, registration protection, and automated fraud management with a monitor mode and email alerts.
 
-> **Current Version: 1.11.0** | **Released: September 5, 2026**
+> **Current Version: 1.12.0** | **Released: September 10, 2026**
 
 ## Features
 
@@ -35,7 +35,8 @@
 
 ### Checkout Protection
 - Blacklists, bans, and the failure limit are enforced pre-payment on both the classic checkout and the Block Checkout (Store API)
-- Customizable block message via `wcaf_checkout_block_message` filter
+- **Classic checkout lock** - on a store whose checkout page renders the Block Checkout, the classic checkout's AJAX endpoints (`wc-ajax=checkout`, `wc-ajax=update_order_review` and their admin-ajax forms) are answered with HTTP 403 before any order or gateway call. No customer of such a store ever sends those requests; card-testing toolkits that walk the legacy flow with one stolen card per fresh IP do. Engages only while the Block Checkout is detected, counts refusals on the Reports tab, and emails an alert at most once an hour. On by default for new installs; stores updating from an earlier version keep it off until they turn it on
+- Customizable block messages via the `wcaf_checkout_block_message` and `wcaf_classic_lock_message` filters
 
 ### REST API Hardening
 - Block unauthenticated order creation via WC REST API and Store API

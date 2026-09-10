@@ -147,6 +147,12 @@ class WCAF_Settings {
 		}, 'wc-antifraud' );
 		add_settings_field( 'enable_rest_hardening', __( 'REST API hardening', 'wc-antifraud' ), [ __CLASS__, 'field_rest_hardening' ], 'wc-antifraud', 'wcaf_rest' );
 		add_settings_field( 'rest_self_test', __( 'Test the protection', 'wc-antifraud' ), [ __CLASS__, 'field_self_test' ], 'wc-antifraud', 'wcaf_rest' );
+
+		// Checkout surface section
+		add_settings_section( 'wcaf_surface', __( 'Checkout Surface', 'wc-antifraud' ), function () {
+			echo '<p>' . esc_html__( 'A store on the Block Checkout submits every order through the Store API, yet WooCommerce keeps the classic checkout\'s AJAX endpoints registered. Card-testing toolkits drive exactly that legacy flow (checkout page, order-review post, classic card fields, checkout post), one stolen card per fresh IP, so per-IP rules never see them coming. No customer of a Block Checkout store ever sends those requests.', 'wc-antifraud' ) . '</p>';
+		}, 'wc-antifraud' );
+		add_settings_field( 'enable_classic_checkout_lock', __( 'Classic checkout lock', 'wc-antifraud' ), [ __CLASS__, 'field_classic_checkout_lock' ], 'wc-antifraud', 'wcaf_surface' );
 	}
 
 	private static function register_blacklist_fields() {
@@ -222,6 +228,7 @@ class WCAF_Settings {
 			$output['enable_proxy_check']        = ! empty( $input['enable_proxy_check'] ) ? 1 : 0;
 			$output['enable_ip_repeat']          = ! empty( $input['enable_ip_repeat'] ) ? 1 : 0;
 			$output['enable_rest_hardening']     = ! empty( $input['enable_rest_hardening'] ) ? 1 : 0;
+			$output['enable_classic_checkout_lock'] = ! empty( $input['enable_classic_checkout_lock'] ) ? 1 : 0;
 			$output['enable_auto_ban']           = ! empty( $input['enable_auto_ban'] ) ? 1 : 0;
 			$output['enable_registration_limit'] = ! empty( $input['enable_registration_limit'] ) ? 1 : 0;
 			if ( isset( $input['target_amount'] ) )    { $output['target_amount']    = floatval( $input['target_amount'] ); }
@@ -638,6 +645,26 @@ class WCAF_Settings {
 			}
 		}
 		arsort( $reason_counts ); arsort( $fraud_emails ); arsort( $fraud_ips );
+
+		// Requests refused before any order or payment existed (pre-payment
+		// checks, REST hardening, classic checkout lock), from the daily counters.
+		$refused_labels = [
+			'refused:classic_checkout' => __( 'Classic checkout lock', 'wc-antifraud' ),
+			'rest_block'               => __( 'REST API hardening', 'wc-antifraud' ),
+			'refused:banned_ip'        => __( 'Temporarily banned IP', 'wc-antifraud' ),
+			'refused:blocked_email'    => __( 'Blacklisted email', 'wc-antifraud' ),
+			'refused:blocked_domain'   => __( 'Blocked email domain', 'wc-antifraud' ),
+			'refused:blocked_ip'       => __( 'Blacklisted IP', 'wc-antifraud' ),
+			'refused:blocked_phone'    => __( 'Blacklisted phone', 'wc-antifraud' ),
+			'refused:decline_limit'    => __( 'Repeated payment failures', 'wc-antifraud' ),
+		];
+		$refused_counts = [];
+		foreach ( WCAF_Stats::totals( (int) $period ) as $k => $n ) {
+			if ( isset( $refused_labels[ $k ] ) && $n > 0 ) {
+				$refused_counts[ $refused_labels[ $k ] ] = (int) $n;
+			}
+		}
+		arsort( $refused_counts );
 		?>
 		<div style="margin-bottom:16px;">
 			<?php foreach ( $periods as $v => $l ) : ?>
@@ -666,6 +693,7 @@ class WCAF_Settings {
 			<?php self::render_report_table( __( 'Fraud Reasons Breakdown', 'wc-antifraud' ), __( 'Reason', 'wc-antifraud' ), $reason_counts ); ?>
 			<?php self::render_report_table( __( 'Top Fraud Emails', 'wc-antifraud' ), __( 'Email', 'wc-antifraud' ), array_slice( $fraud_emails, 0, 10, true ) ); ?>
 			<?php self::render_report_table( __( 'Top Fraud IPs', 'wc-antifraud' ), __( 'IP Address', 'wc-antifraud' ), array_slice( $fraud_ips, 0, 10, true ) ); ?>
+			<?php self::render_report_table( __( 'Refused Before Payment', 'wc-antifraud' ), __( 'Rule', 'wc-antifraud' ), $refused_counts ); ?>
 		</div>
 
 		<!-- AbuseIPDB community reporting settings -->
@@ -875,6 +903,26 @@ class WCAF_Settings {
 			esc_html__( 'Block unauthenticated order creation via REST API', 'wc-antifraud' ),
 			esc_html__( 'Prevents bots from POSTing directly to WooCommerce order endpoints. Only allows requests with valid checkout session nonces, API keys, or admin authentication. Allowlisted IPs always pass, temporarily banned IPs never do. Recommended: always on.', 'wc-antifraud' )
 		);
+	}
+
+	public static function field_classic_checkout_lock() {
+		$o = self::opt();
+		printf( '<label><input name="%s[enable_classic_checkout_lock]" type="checkbox" value="1" %s /> %s</label><p class="description">%s</p>',
+			esc_attr( self::key() ), checked( 1, $o['enable_classic_checkout_lock'], false ),
+			esc_html__( 'Refuse the classic checkout endpoints while the Block Checkout is in use', 'wc-antifraud' ),
+			esc_html__( 'Answers wc-ajax=checkout and wc-ajax=update_order_review (and their admin-ajax forms) with HTTP 403 before WooCommerce creates an order or contacts the gateway. Engages only while the checkout page contains the Block Checkout; a store on the shortcode checkout is never affected. Allowlisted IPs always pass. Refusals are counted on the Reports tab and reported by email at most once an hour. Recommended: on.', 'wc-antifraud' )
+		);
+		if ( ! WCAF_Checkout_Surface::is_block_checkout() ) {
+			printf(
+				'<p class="description">%s</p>',
+				esc_html__( 'Inactive: the checkout page of this store uses the classic (shortcode) checkout, so the classic endpoints are the real checkout and stay open.', 'wc-antifraud' )
+			);
+		} elseif ( ! empty( $o['enable_classic_checkout_lock'] ) ) {
+			printf(
+				'<p class="description" style="color:#00a32a;font-weight:600;">%s</p>',
+				esc_html__( 'Active: Block Checkout detected, classic checkout requests are refused.', 'wc-antifraud' )
+			);
+		}
 	}
 
 	public static function field_self_test() {

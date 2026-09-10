@@ -61,6 +61,7 @@ class WC_Antifraud {
 		require_once $dir . 'class-wcaf-fraud-checks.php';
 		require_once $dir . 'class-wcaf-stripe-decline.php';
 		require_once $dir . 'class-wcaf-rest-hardening.php';
+		require_once $dir . 'class-wcaf-checkout-surface.php';
 		require_once $dir . 'class-wcaf-registration.php';
 		require_once $dir . 'class-wcaf-settings.php';
 		require_once $dir . 'class-wcaf-github-updater.php';
@@ -119,6 +120,10 @@ class WC_Antifraud {
 
 		WCAF_REST_Hardening::init();
 
+		// Refuse the classic checkout's AJAX endpoints on a Block Checkout store
+		// (no customer uses them there, card-testing toolkits do).
+		WCAF_Checkout_Surface::init();
+
 		// Count failed payments per visitor (feeds the admin notice, the optional
 		// checkout block, and auto-ban).
 		WCAF_Decline_Clusters::init();
@@ -162,7 +167,7 @@ class WC_Antifraud {
 	/**
 	 * Bump when a default changes in a way that must not reach existing stores.
 	 */
-	const OPTIONS_SCHEMA_VERSION = 1;
+	const OPTIONS_SCHEMA_VERSION = 2;
 
 	/**
 	 * One-time option upgrades.
@@ -174,15 +179,30 @@ class WC_Antifraud {
 	 *
 	 * Version 1: detection_mode defaulted to "block" through 1.10.0 and defaults
 	 * to "monitor" from the next release; existing stores stay in Block.
+	 *
+	 * Version 2: enable_classic_checkout_lock is new in 1.12.0 and defaults to on
+	 * for new installs; stores that predate it keep the classic endpoints open
+	 * until the merchant turns the lock on.
 	 */
 	public static function upgrade_options() {
 		if ( (int) get_option( self::OPTIONS_SCHEMA_OPTION, 0 ) >= self::OPTIONS_SCHEMA_VERSION ) {
 			return;
 		}
+		$from   = (int) get_option( self::OPTIONS_SCHEMA_OPTION, 0 );
 		$stored = get_option( self::OPTION_KEY, null );
-		if ( is_array( $stored ) && ! isset( $stored['detection_mode'] ) ) {
-			$stored['detection_mode'] = 'block';
-			update_option( self::OPTION_KEY, $stored );
+		if ( is_array( $stored ) ) {
+			$changed = false;
+			if ( $from < 1 && ! isset( $stored['detection_mode'] ) ) {
+				$stored['detection_mode'] = 'block';
+				$changed                  = true;
+			}
+			if ( $from < 2 && ! isset( $stored['enable_classic_checkout_lock'] ) ) {
+				$stored['enable_classic_checkout_lock'] = 0;
+				$changed                                = true;
+			}
+			if ( $changed ) {
+				update_option( self::OPTION_KEY, $stored );
+			}
 		}
 		update_option( self::OPTIONS_SCHEMA_OPTION, self::OPTIONS_SCHEMA_VERSION, false );
 	}
@@ -214,6 +234,7 @@ class WC_Antifraud {
 			'enable_registration_limit' => 0,
 			'registration_max_per_hour' => 10,
 			'enable_rest_hardening'     => 1,
+			'enable_classic_checkout_lock' => 1,
 			'enable_abuseipdb'          => 0,
 			'abuseipdb_api_key'         => '',
 			'allowed_ips'               => '',
