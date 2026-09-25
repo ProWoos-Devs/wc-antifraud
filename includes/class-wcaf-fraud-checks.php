@@ -22,6 +22,15 @@ class WCAF_Fraud_Checks {
 	/** Shortest normalized ship-to key (street + postcode) worth comparing. */
 	const LINKED_ADDRESS_MIN_LENGTH = 6;
 
+	/** WC session key set when the checkout page is rendered for that session. */
+	const CHECKOUT_SEEN_SESSION_KEY = 'wcaf_checkout_seen';
+
+	/**
+	 * Order meta copied from the session at Store API checkout: the customer's
+	 * session rendered the checkout page before the order was placed.
+	 */
+	const CHECKOUT_SEEN_META = '_wcaf_checkout_seen';
+
 	/** Most recent fraud orders considered as anchors. */
 	const LINKED_ANCHOR_LIMIT = 500;
 
@@ -39,6 +48,15 @@ class WCAF_Fraud_Checks {
 		// before payment; throwing a RouteException here refuses the checkout
 		// with a proper Store API error and no payment attempt is made.
 		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ $this, 'check_store_api_checkout' ], 5, 2 );
+
+		// Server-side record that the checkout page was rendered in this session,
+		// copied onto the order at Store API checkout. The attribution data the
+		// Store API bot rule relies on is written by JavaScript and goes missing
+		// when a real customer's browser blocks it (ad blocker, strict tracking
+		// protection); this marker does not depend on the browser at all.
+		add_action( 'template_redirect', [ $this, 'mark_checkout_seen' ] );
+		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ $this, 'stamp_checkout_seen' ], 10, 2 );
+		add_action( 'woocommerce_checkout_create_order', [ $this, 'stamp_checkout_seen' ], 10, 2 );
 
 		add_action( 'woocommerce_thankyou', [ $this, 'analyze_order_after_payment' ], 10, 1 );
 
@@ -123,6 +141,38 @@ class WCAF_Fraud_Checks {
 		WCAF_Stats::bump( 'refused:' . $reason );
 		if ( class_exists( '\Automattic\WooCommerce\StoreApi\Exceptions\RouteException' ) ) {
 			throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException( 'wcaf_' . $reason, $this->block_message(), 403 );
+		}
+	}
+
+	/**
+	 * Record in the WC session that the checkout page was rendered.
+	 */
+	public function mark_checkout_seen() {
+		if ( ! function_exists( 'is_checkout' ) || ! is_checkout() || is_order_received_page() || is_checkout_pay_page() ) {
+			return;
+		}
+		if ( ! WC()->session || ! WC()->session->has_session() ) {
+			return;
+		}
+		if ( ! WC()->session->get( self::CHECKOUT_SEEN_SESSION_KEY ) ) {
+			WC()->session->set( self::CHECKOUT_SEEN_SESSION_KEY, time() );
+		}
+	}
+
+	/**
+	 * Copy the checkout-page marker from the session onto the order being
+	 * created (Store API and classic checkout).
+	 *
+	 * @param WC_Order              $order
+	 * @param WP_REST_Request|array $request Request or posted data (unused).
+	 */
+	public function stamp_checkout_seen( $order, $request = null ) {
+		if ( ! $order instanceof WC_Order || ! WC()->session ) {
+			return;
+		}
+		$seen = (int) WC()->session->get( self::CHECKOUT_SEEN_SESSION_KEY );
+		if ( $seen > 0 ) {
+			$order->update_meta_data( self::CHECKOUT_SEEN_META, $seen );
 		}
 	}
 
@@ -243,14 +293,24 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
-	 * Whether the order was already marked fraud, or already flagged in monitor mode.
+	 * Whether the order was already marked fraud, already flagged in monitor
+	 * mode, or already released from a fraud status by the merchant.
+	 *
+	 * The persistent fraud flag counts too: WooCommerce fires the new status's
+	 * hook (e.g. woocommerce_order_status_processing) BEFORE
+	 * woocommerce_order_status_changed, so while a merchant moves an order out
+	 * of Auto Cancelled the flag is still set and the release mark is not yet.
+	 * Without this the analysis re-ran inside the release and cancelled the
+	 * order again in the same second.
 	 *
 	 * @param WC_Order $order
 	 * @return bool
 	 */
 	private function already_handled( $order ) {
 		return in_array( $order->get_status(), WCAF_Order_Status::fraud_statuses(), true )
-			|| WCAF_Order_Status::is_monitor_flagged( $order );
+			|| WCAF_Order_Status::is_monitor_flagged( $order )
+			|| WCAF_Order_Status::is_released( $order )
+			|| 'yes' === $order->get_meta( WCAF_Order_Status::FRAUD_FLAG_META );
 	}
 
 	/**
@@ -295,15 +355,20 @@ class WCAF_Fraud_Checks {
 		}
 
 		// Store API bot detection (always on).
-		// Orders created via store-api with no WC attribution data are bots
-		// posting directly to the API, bypassing the actual checkout page.
+		// Orders created via store-api with no WC attribution data AND no
+		// server-side record of the checkout page are bots posting directly to
+		// the API, bypassing the actual checkout page. Attribution alone is not
+		// enough: it is written by JavaScript, and a real customer whose browser
+		// blocks it (ad blocker, strict tracking protection) lost a paid order to
+		// this rule on a live store (1.12.1). The unknown-origin rule below uses
+		// the same marker.
 		// Both attribution rules are skipped entirely when the store has WooCommerce's
 		// Order Attribution feature turned off: then NO order carries attribution and
 		// the rules would cancel every genuine order (seen on a live store, 1.5.1).
 		$created_via = $order->get_created_via();
 		if ( ! WCAF_Helpers::order_attribution_enabled() ) {
 			// no attribution-based signal available on this store
-		} elseif ( 'store-api' === $created_via && empty( $order->get_meta( '_wc_order_attribution_source_type' ) ) ) {
+		} elseif ( 'store-api' === $created_via && empty( $order->get_meta( '_wc_order_attribution_source_type' ) ) && ! $order->get_meta( self::CHECKOUT_SEEN_META ) ) {
 			$reasons['store_api_bot'] = __( 'Store API Bot Order (no checkout session)', 'wc-antifraud' );
 		} elseif ( $this->is_unknown_origin_check_enabled() && $this->is_unknown_origin_order( $order ) ) {
 			// Unknown origin (optional toggle) — ANY customer-facing order with no
@@ -490,6 +555,10 @@ class WCAF_Fraud_Checks {
 	 * must never be flagged. Bots only ever use the classic checkout or the Store
 	 * API, so restricting to these loses nothing.
 	 *
+	 * An order whose session rendered the checkout page (CHECKOUT_SEEN_META) is
+	 * not of unknown origin even without attribution: the customer's browser
+	 * just blocked the attribution script.
+	 *
 	 * @param WC_Order $order
 	 * @return bool
 	 */
@@ -498,7 +567,8 @@ class WCAF_Fraud_Checks {
 		if ( ! in_array( $created_via, [ 'checkout', 'store-api' ], true ) ) {
 			return false;
 		}
-		return empty( $order->get_meta( '_wc_order_attribution_source_type' ) );
+		return empty( $order->get_meta( '_wc_order_attribution_source_type' ) )
+			&& ! $order->get_meta( self::CHECKOUT_SEEN_META );
 	}
 
 	/**

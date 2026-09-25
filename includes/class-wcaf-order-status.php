@@ -75,6 +75,13 @@ class WCAF_Order_Status {
 	const MONITOR_FLAG_META = '_wcaf_monitor_flag';
 
 	/**
+	 * Order meta set when an order leaves a fraud status for a normal one
+	 * (the merchant releasing a false positive). Post-payment analysis never
+	 * judges a released order again.
+	 */
+	const RELEASED_META = '_wcaf_released';
+
+	/**
 	 * Key of the "Block this customer" entry in the order-screen Actions dropdown.
 	 */
 	const BLOCK_ACTION = 'wcaf_block_customer';
@@ -125,10 +132,33 @@ class WCAF_Order_Status {
 			return;
 		}
 		// A refund keeps the fraud designation (persistent flag); it is not an un-mark.
-		if ( 'refunded' === $to || ! is_admin() || wp_doing_cron() ) {
+		if ( 'refunded' === $to ) {
+			return;
+		}
+
+		// Released: clear the fraud flag (so the Fraud badge goes) and mark the
+		// order so no later status change re-runs the analysis on it.
+		$order = wc_get_order( $order_id );
+		if ( $order ) {
+			$order->delete_meta_data( self::FRAUD_FLAG_META );
+			$order->update_meta_data( self::RELEASED_META, 'yes' );
+			$order->save_meta_data();
+		}
+
+		if ( ! is_admin() || wp_doing_cron() ) {
 			return;
 		}
 		WCAF_Stats::bump( 'unmarked' );
+	}
+
+	/**
+	 * Whether the merchant released this order from a fraud status.
+	 *
+	 * @param WC_Order $order
+	 * @return bool
+	 */
+	public static function is_released( $order ) {
+		return $order && 'yes' === $order->get_meta( self::RELEASED_META );
 	}
 
 	/**

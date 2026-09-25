@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-09-25
+
+### Fixed
+- **A released order was cancelled again the moment it was released.** Moving an Auto Cancelled order back to Processing (or Completed, or On hold) fired that status's hook, the post-payment analysis ran again, found the same reason, and cancelled the order in the same second. WooCommerce fires the new status's hook before `woocommerce_order_status_changed`, so the analysis now also skips any order that still carries the persistent fraud flag, and the transition out of a fraud status marks the order as released (`_wcaf_released`) so no later status change judges it again. The release also clears the fraud flag, so the order loses its Fraud badge. A refund still keeps the fraud designation, as before.
+- **The Store API bot rule cancelled a real, paid order.** The rule treated every Store API order without WooCommerce Order Attribution data as a bot posting straight to the API. Attribution is written by JavaScript in the customer's browser, and a real customer whose browser blocked it (ad blocker, strict tracking protection) came through the checkout page, paid, and was auto-cancelled on a live store, 1 order in over 1,000. The plugin now records server-side, in the WooCommerce session, that the checkout page was rendered, and copies that onto the order at checkout (`_wcaf_checkout_seen`, Store API and classic checkout). "Store API Bot Order (no checkout session)" fires only when the order has no attribution and its session never rendered the checkout page; the optional Unknown Origin rule uses the same test. Orders posted straight to the API are caught exactly as before. A checkout page served from a full-page cache sets no marker, which leaves those orders judged as in 1.12.0.
+
 ## [1.12.0] - 2026-09-10
 
 ### Added
