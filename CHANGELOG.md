@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.2] - 2026-09-28
+
+### Fixed
+- **Fatal error on the Activity Log and Reports tabs with WooCommerce deactivated.** The Antifraud menu stayed registered when WooCommerce was inactive, and both tabs crashed on `wc_get_order()`. The admin screens and the custom order statuses now load only when WooCommerce is active, the same condition the rest of the plugin already used; the "requires WooCommerce" notice still shows, and updates still arrive. Found during QA by @szczepaniakmateusz59-del. (#13)
+
 ## [1.12.1] - 2026-09-25
 
 ### Fixed
