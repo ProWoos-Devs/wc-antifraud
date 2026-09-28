@@ -83,11 +83,23 @@ class WC_Antifraud {
 	public function init() {
 		load_plugin_textdomain( 'wc-antifraud', false, dirname( WCAF_PLUGIN_BASENAME ) . '/languages' );
 		self::upgrade_options();
+
+		if ( is_admin() ) {
+			// The updater keeps working without WooCommerce, so a fix can still arrive.
+			new WCAF_GitHub_Updater();
+		}
+
+		// Everything below calls WooCommerce functions. Without WooCommerce the
+		// admin notice from on_plugins_loaded() is all the plugin shows; the
+		// Activity Log and Reports tabs used to fatal on wc_get_order().
+		if ( ! class_exists( 'WooCommerce' ) ) {
+			return;
+		}
+
 		WCAF_Order_Status::init();
 
 		if ( is_admin() ) {
 			WCAF_Settings::init();
-			new WCAF_GitHub_Updater();
 		}
 	}
 
