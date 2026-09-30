@@ -48,6 +48,7 @@ class WC_Antifraud {
 	 */
 	private function load_dependencies() {
 		$dir = WCAF_PLUGIN_DIR . 'includes/';
+		require_once $dir . 'class-wcaf-ip-resolver.php';
 		require_once $dir . 'class-wcaf-helpers.php';
 		require_once $dir . 'class-wcaf-client-ip.php';
 		require_once $dir . 'class-wcaf-stats.php';
