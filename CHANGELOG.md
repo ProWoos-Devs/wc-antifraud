@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Client address resolution moved into `WCAF_IP_Resolver`, a class with no WordPress dependency that takes the server variables and a trust configuration (Cloudflare ranges, declared proxies, the forwarding switch). `WCAF_Client_IP::resolve()` calls it with the options, and `WCAF_Client_IP::trust_config()` returns that configuration. It is the same class Bot Storm Radar uses (`BSR_IP_Resolver`), so the shared code now lives in one self-contained file per plugin. Declared proxies are still read one per line. No behavior change.
+
 ## [1.12.2] - 2026-09-28
 
 ### Fixed
