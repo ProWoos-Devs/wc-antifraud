@@ -421,7 +421,9 @@ class WCAF_Fraud_Checks {
 		// Linked to known fraud. On a PAID order the anchors are the plugin's own
 		// detections and manual marks only, never a Stripe verdict: Radar does
 		// block real customers now and then, and that customer paying again by
-		// another route must not lose the sale.
+		// another route must not lose the sale. A failed order that was itself
+		// only linked to a Stripe verdict carries the Stripe status too (see
+		// handle_suspicious_order()), so it cannot anchor a paid order either.
 		$reasons += $this->linked_fraud_reason( $order, $failed );
 
 		return $reasons;
@@ -435,7 +437,11 @@ class WCAF_Fraud_Checks {
 	 * and postcode (shipping address, or billing when the order has no shipping
 	 * address), or the customer IP within LINKED_IP_WINDOW of the anchor's
 	 * creation. Returns a one-element reasons array (slug => label naming the
-	 * anchor order and the shared datum) or an empty array.
+	 * anchor order and the shared datum) or an empty array. The slug is
+	 * `linked_fraud` when the anchor is one of the plugin's own detections or a
+	 * manual mark, `linked_gateway_fraud` when the anchor is a Stripe verdict
+	 * ("Cancelled by Stripe"), so the caller can keep the gateway origin on the
+	 * new order instead of turning it into a plugin detection.
 	 *
 	 * @param WC_Order $order                  Order under analysis.
 	 * @param bool     $include_stripe_anchors Whether "Cancelled by Stripe" orders may anchor the match.
@@ -487,8 +493,9 @@ class WCAF_Fraud_Checks {
 			}
 
 			if ( '' !== $match ) {
+				$slug = in_array( $row['status'], $stripe_status, true ) ? 'linked_gateway_fraud' : 'linked_fraud';
 				return [
-					'linked_fraud' => sprintf(
+					$slug => sprintf(
 						/* translators: 1: order number of the earlier fraud order, 2: what the two orders share */
 						__( 'Linked to known fraud order #%1$d (%2$s)', 'wc-antifraud' ),
 						$anchor_id,
@@ -589,12 +596,22 @@ class WCAF_Fraud_Checks {
 		// address, a shared mobile-carrier IP). Like gateway verdicts it never
 		// reports the IP to AbuseIPDB on its own; the anchor already did if it
 		// deserved it, and public reports cannot be taken back.
-		$report_ip = ! empty( array_diff_key( $reasons, [ 'linked_fraud' => true ] ) );
+		$link_slugs = [ 'linked_fraud' => true, 'linked_gateway_fraud' => true ];
+		$report_ip  = ! empty( array_diff_key( $reasons, $link_slugs ) );
+		// An order whose ONLY reason is a link to a Stripe verdict inherits the
+		// Stripe status ("Cancelled by Stripe"), not "Auto Cancelled". The
+		// verdict is still Stripe's, and the paid path skips Stripe anchors; as
+		// a plugin status it would anchor the customer's next, paid attempt and
+		// cancel a captured sale (seen live: Radar block, failed retry linked to
+		// it, paid third attempt linked to the retry).
+		$status = [ 'linked_gateway_fraud' ] === array_keys( $reasons )
+			? WCAF_Order_Status::STRIPE_STATUS_SLUG
+			: WCAF_Order_Status::STATUS_SLUG;
 		if ( $monitor ) {
 			WCAF_Order_Status::flag_for_review( $order, $labels );
 			WCAF_Stats::bump( 'monitor_flagged' );
 		} else {
-			WCAF_Order_Status::mark_as_fraud( $order, $labels, $report_ip );
+			WCAF_Order_Status::mark_as_fraud( $order, $labels, $report_ip, $status );
 		}
 		foreach ( array_keys( $reasons ) as $slug ) {
 			WCAF_Stats::bump( 'reason:' . $slug );

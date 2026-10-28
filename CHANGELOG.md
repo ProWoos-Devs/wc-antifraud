@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.3] - 2026-10-28
+
+### Fixed
+- **A customer whose card Stripe Radar blocked lost a paid order two attempts later.** The paid-order path of the Linked to Known Fraud rule skips "Cancelled by Stripe" anchors on purpose, so a real customer blocked by Radar can pay another way. But a failed retry linked to that Stripe verdict was marked "Auto Cancelled", a plugin status, and the customer's third, successful attempt was then linked to the retry and cancelled with the charge captured (live store, 2026-10-27: Radar block at 22:49, failed retry at 22:50, paid order at 22:52 cancelled, 343 EUR). An order whose only reason is a link to a Stripe verdict, directly or through such a chain, now gets the "Cancelled by Stripe" status itself (reason slug `linked_gateway_fraud`, same note text, same no-AbuseIPDB rule), so it can never anchor a paid order. Links to the plugin's own detections and manual marks are unchanged. Tests in section 8b.
+
 ### Changed
 - The client address is resolved from the five server variables the resolver reads (`WCAF_IP_Resolver::SERVER_KEYS`), each through `sanitize_text_field()`, instead of the whole `$_SERVER`. Same change as Bot Storm Radar's shared copy.
 - Client address resolution moved into `WCAF_IP_Resolver`, a class with no WordPress dependency that takes the server variables and a trust configuration (Cloudflare ranges, declared proxies, the forwarding switch). `WCAF_Client_IP::resolve()` calls it with the options, and `WCAF_Client_IP::trust_config()` returns that configuration. It is the same class Bot Storm Radar uses (`BSR_IP_Resolver`), so the shared code now lives in one self-contained file per plugin. Declared proxies are still read one per line. No behavior change.
