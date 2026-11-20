@@ -73,8 +73,20 @@ class WCAF_Settings {
 
 	// ── Registration ──────────────────────────────────────────────────
 
+	/**
+	 * Capability needed to save the settings form, the same as the menu's.
+	 *
+	 * @return string
+	 */
+	public static function settings_capability() {
+		return 'manage_woocommerce';
+	}
+
 	public static function register_settings() {
 		register_setting( 'wcaf_group', WC_Antifraud::OPTION_KEY, [ __CLASS__, 'sanitize' ] );
+		// The menu is open to manage_woocommerce (shop managers); options.php
+		// would otherwise require manage_options to save the form (1.13.0).
+		add_filter( 'option_page_capability_wcaf_group', [ __CLASS__, 'settings_capability' ] );
 		$tab = self::get_current_tab();
 
 		if ( 'detection' === $tab ) {
@@ -358,7 +370,7 @@ class WCAF_Settings {
 			'telemetry_sent' => __( 'Report sent.', 'wc-antifraud' ),
 			'telemetry_failed' => __( 'The report could not be sent (consent missing, or the receiver did not answer 200). See the status line under Privacy.', 'wc-antifraud' ),
 			'telemetry_deleted' => __( 'The receiver confirmed the deletion. Reports are off and the install ID was removed.', 'wc-antifraud' ),
-			'telemetry_delete_failed' => __( 'Reports are off and the install ID was removed locally, but the receiver could not be reached to confirm the deletion.', 'wc-antifraud' ),
+			'telemetry_delete_failed' => __( 'Reports are off, but the receiver could not be reached to confirm the deletion. It is retried once a day, or use "Retry the deletion" under Privacy.', 'wc-antifraud' ),
 		];
 		if ( ! isset( $messages[ $key ] ) ) {
 			return;
@@ -602,7 +614,7 @@ class WCAF_Settings {
 							<td><?php $d = $order->get_date_created(); echo $d ? esc_html( $d->date_i18n( 'M j, Y g:i a' ) ) : '—'; ?></td>
 							<td><?php echo esc_html( $order->get_billing_email() ); ?></td>
 							<td><?php echo wp_kses_post( $order->get_formatted_order_total() ); ?></td>
-							<td><?php echo esc_html( $order->get_customer_ip_address() ?: '—' ); ?></td>
+							<td><?php echo esc_html( WCAF_Fraud_Checks::order_ip_or_legacy( $order ) ?: '—' ); ?></td>
 							<td><?php echo $is_fraud ? esc_html__( 'Cancelled', 'wc-antifraud' ) : '<span class="wcaf-monitor">' . esc_html__( 'Flagged (monitor)', 'wc-antifraud' ) . '</span>'; ?></td>
 							<td><span class="wcaf-fraud"><?php echo esc_html( $reason ?: '—' ); ?></span></td>
 						</tr>
@@ -635,7 +647,7 @@ class WCAF_Settings {
 		foreach ( $fraud_orders as $order ) {
 			$e = $order->get_billing_email();
 			if ( $e ) { $fraud_emails[ $e ] = ( $fraud_emails[ $e ] ?? 0 ) + 1; }
-			$ip = $order->get_customer_ip_address();
+			$ip = WCAF_Fraud_Checks::order_ip_or_legacy( $order );
 			if ( $ip ) { $fraud_ips[ $ip ] = ( $fraud_ips[ $ip ] ?? 0 ) + 1; }
 			foreach ( wc_get_order_notes( [ 'order_id' => $order->get_id(), 'type' => 'internal' ] ) as $note ) {
 				if ( preg_match( '/Reasons:\s*(.+)$/i', $note->content, $m ) ) {
@@ -1077,6 +1089,16 @@ class WCAF_Settings {
 				esc_html__( 'Delete my data and stop', 'wc-antifraud' ),
 				esc_html__( 'Install ID:', 'wc-antifraud' ),
 				esc_html( WCAF_Telemetry::install_id() )
+			);
+		}
+		$pending = WCAF_Telemetry::pending_deletion();
+		if ( '' !== $pending ) {
+			printf(
+				'<p class="description">%s <code>%s</code> &middot; <a href="%s">%s</a></p>',
+				esc_html__( 'Deletion not yet confirmed by the receiver for install ID', 'wc-antifraud' ),
+				esc_html( $pending ),
+				esc_url( wp_nonce_url( admin_url( 'admin.php?page=wc-antifraud&tab=notifications&wcaf_action=telemetry_delete' ), self::ACTION_NONCE ) ),
+				esc_html__( 'Retry the deletion', 'wc-antifraud' )
 			);
 		}
 	}

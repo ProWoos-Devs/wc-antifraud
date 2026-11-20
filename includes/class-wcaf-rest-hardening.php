@@ -95,6 +95,19 @@ class WCAF_REST_Hardening {
 			return $result;
 		}
 
+		// WooCommerce's supported headless flow (1.13.0): a Store API request
+		// carrying a VALID Cart-Token, which WooCommerce accepts in place of the
+		// nonce (AbstractCartRoute::requires_nonce()). The token is signed by
+		// the store and handed out by GET /wc/store/v1/cart exactly like the
+		// nonce, so it proves no less. Verified, never trusted by presence.
+		$cart_token = (string) $request->get_header( 'cart_token' );
+		if ( '' !== $cart_token
+			&& 0 === strpos( $route, '/wc/store/' )
+			&& class_exists( '\Automattic\WooCommerce\StoreApi\Utilities\CartTokenUtils' )
+			&& \Automattic\WooCommerce\StoreApi\Utilities\CartTokenUtils::validate_cart_token( $cart_token ) ) {
+			return $result;
+		}
+
 		error_log( sprintf( 'WC Antifraud: Blocked REST API order creation. Route: %s, IP: %s', $route, $ip ?: 'unknown' ) );
 		WCAF_Stats::bump( 'rest_block' );
 

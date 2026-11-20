@@ -162,8 +162,12 @@ class WCAF_Decline_Clusters {
 			return;
 		}
 
-		$ip = (string) $order->get_customer_ip_address();
-		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, WCAF_Helpers::get_options() ) ) {
+		// The plugin-resolved address only (1.13.0): WooCommerce's stored IP can
+		// be chosen by the client, which would let a bot push an innocent address
+		// over the block threshold. The allowlist exemption may use either.
+		$ip       = (string) WCAF_Fraud_Checks::order_ip( $order );
+		$allow_ip = WCAF_Fraud_Checks::order_ip_or_legacy( $order );
+		if ( $allow_ip && WCAF_Helpers::is_ip_allowed( $allow_ip, WCAF_Helpers::get_options() ) ) {
 			// The merchant's own test declines must not raise the alarm.
 			return;
 		}

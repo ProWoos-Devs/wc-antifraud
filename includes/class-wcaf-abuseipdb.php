@@ -72,9 +72,12 @@ class WCAF_AbuseIPDB {
 			return;
 		}
 
-		// Use the IP stored ON THE ORDER, never the current request IP — a
-		// bulk action runs in the admin's request, whose IP is the admin's.
-		$ip = $order->get_customer_ip_address();
+		// Use the address the plugin resolved from the customer's checkout
+		// request and stored on the order, never the current request's (a bulk
+		// action runs in the admin's request) and never WooCommerce's stored IP,
+		// which a forged X-Real-IP header sets (1.13.0). Public reports cannot
+		// be taken back, so an order without the stored address is not reported.
+		$ip = WCAF_Fraud_Checks::order_ip( $order );
 		if ( ! self::is_reportable_ip( $ip ) ) {
 			return;
 		}

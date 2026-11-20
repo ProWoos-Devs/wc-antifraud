@@ -35,6 +35,15 @@ class WCAF_Fraud_Checks {
 	 */
 	const PROXY_SEEN_META = '_wcaf_proxy_seen';
 
+	/**
+	 * Order meta holding the client address as THIS plugin resolved it
+	 * (trusted-proxy model) from the customer's own request (1.13.0).
+	 * WooCommerce's stored customer IP trusts X-Real-IP / X-Forwarded-For from
+	 * anyone, so a bot can choose it; rules that count against an address use
+	 * this value only.
+	 */
+	const CLIENT_IP_META = '_wcaf_client_ip';
+
 	/** WC session key set when the checkout page is rendered for that session. */
 	const CHECKOUT_SEEN_SESSION_KEY = 'wcaf_checkout_seen';
 
@@ -75,6 +84,14 @@ class WCAF_Fraud_Checks {
 		// the order, because the paid/failed transitions usually run elsewhere.
 		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ $this, 'stamp_proxy_signal' ], 10, 2 );
 		add_action( 'woocommerce_checkout_create_order', [ $this, 'stamp_proxy_signal' ], 10, 2 );
+
+		// The client address as resolved by the plugin, from the customer's
+		// request: when the order is created (covers gateways that create the
+		// order in their own endpoint, such as PayPal express buttons) and again
+		// at checkout, which is always the customer's request.
+		add_action( 'woocommerce_new_order', [ __CLASS__, 'stamp_client_ip_on_create' ], 10, 2 );
+		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ __CLASS__, 'stamp_client_ip' ], 10, 1 );
+		add_action( 'woocommerce_checkout_create_order', [ __CLASS__, 'stamp_client_ip' ], 10, 1 );
 
 		add_action( 'woocommerce_thankyou', [ $this, 'analyze_order_after_payment' ], 10, 1 );
 
@@ -213,6 +230,59 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
+	 * Record the plugin-resolved client address on an order being placed by
+	 * the customer (Store API or classic checkout). The caller saves the order.
+	 *
+	 * @param WC_Order $order
+	 */
+	public static function stamp_client_ip( $order ) {
+		if ( ! $order instanceof WC_Order || ! self::is_customer_request() ) {
+			return;
+		}
+		$ip = WCAF_Helpers::get_client_ip();
+		if ( $ip && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
+			$order->update_meta_data( self::CLIENT_IP_META, $ip );
+		}
+	}
+
+	/**
+	 * Same, when a customer-facing order is first created. Never overwrites an
+	 * address already recorded, because WooCommerce also fires this hook when
+	 * a draft order leaves the draft status, which is not always the customer's
+	 * request.
+	 *
+	 * @param int           $order_id
+	 * @param WC_Order|null $order
+	 */
+	public static function stamp_client_ip_on_create( $order_id, $order = null ) {
+		if ( ! $order instanceof WC_Order ) {
+			$order = wc_get_order( $order_id );
+		}
+		if ( ! $order instanceof WC_Order
+			|| ! in_array( $order->get_created_via(), [ 'checkout', 'store-api' ], true )
+			|| '' !== (string) $order->get_meta( self::CLIENT_IP_META ) ) {
+			return;
+		}
+		self::stamp_client_ip( $order );
+		if ( '' !== (string) $order->get_meta( self::CLIENT_IP_META ) ) {
+			$order->save_meta_data();
+		}
+	}
+
+	/**
+	 * Whether the current request can be the customer's own (not cron, not
+	 * WP-CLI, not a wp-admin screen).
+	 *
+	 * @return bool
+	 */
+	private static function is_customer_request() {
+		if ( wp_doing_cron() || ( defined( 'WP_CLI' ) && WP_CLI ) ) {
+			return false;
+		}
+		return ! is_admin() || wp_doing_ajax();
+	}
+
+	/**
 	 * The shared pre-payment check set, for both checkout surfaces.
 	 *
 	 * Order matters: the allowlist exempts everything, a temporary ban comes
@@ -304,8 +374,8 @@ class WCAF_Fraud_Checks {
 		// signal — an order with no attribution at all, an unambiguous bot. The
 		// amount and IP-repeat heuristics are deliberately NOT run here, so a genuine
 		// decline+retry can't false-positive.
-		$ip = self::order_ip( $order );
-		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $this->options ) ) {
+		$allow_ip = self::order_ip_or_legacy( $order );
+		if ( $allow_ip && WCAF_Helpers::is_ip_allowed( $allow_ip, $this->options ) ) {
 			return;
 		}
 		if ( $this->is_unknown_origin_check_enabled() && $this->is_unknown_origin_order( $order ) ) {
@@ -350,26 +420,46 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
-	 * The IP to judge an order by.
+	 * The IP to judge an order by: the address this plugin resolved from the
+	 * customer's own request and stored on the order (CLIENT_IP_META).
 	 *
-	 * The IP stored on the order, never the current request's. The post-payment
-	 * hooks frequently run inside a gateway webhook (Stripe, PayPal IPN) or an
-	 * admin status change, where the request IP is the gateway's server or the
-	 * admin's own address.
+	 * Never the current request's address (the post-payment hooks usually run
+	 * in a gateway webhook or an admin status change), and since 1.13.0 never
+	 * WooCommerce's stored customer IP either, which a bot can choose with a
+	 * forged X-Real-IP or X-Forwarded-For header. Every rule that counts
+	 * against an address (blacklist, IP repeat, IP link, decline counter,
+	 * AbuseIPDB) uses this. Orders placed before 1.13.0 have no stored value
+	 * and are not judged by IP (false).
 	 *
 	 * @param WC_Order $order
 	 * @return string|false
 	 */
 	public static function order_ip( $order ) {
-		$ip = (string) $order->get_customer_ip_address();
+		$ip = (string) $order->get_meta( self::CLIENT_IP_META );
 		if ( '' !== $ip && filter_var( $ip, FILTER_VALIDATE_IP ) ) {
 			return $ip;
 		}
-
-		// Fail open when the order has no trustworthy address. Falling back to the
-		// current request can attribute a gateway webhook or an admin action to the
-		// gateway/admin and poison IP-linked rules and third-party reports.
 		return false;
+	}
+
+	/**
+	 * order_ip(), or WooCommerce's stored customer IP on an order placed
+	 * before 1.13.0. Only for uses that cannot harm an address: the allowlist
+	 * exemption and what is shown to the merchant.
+	 *
+	 * @param WC_Order $order
+	 * @return string|false
+	 */
+	public static function order_ip_or_legacy( $order ) {
+		$ip = self::order_ip( $order );
+		if ( $ip ) {
+			return $ip;
+		}
+		if ( '' !== (string) $order->get_meta( self::CLIENT_IP_META ) ) {
+			return false; // Recorded but invalid: do not fall back.
+		}
+		$wc = (string) $order->get_customer_ip_address();
+		return ( '' !== $wc && filter_var( $wc, FILTER_VALIDATE_IP ) ) ? $wc : false;
 	}
 
 	/**
@@ -386,7 +476,8 @@ class WCAF_Fraud_Checks {
 
 		// Allowlisted IPs bypass every rule (staging, headless front ends,
 		// the merchant's own testing).
-		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $opts ) ) {
+		$allow_ip = self::order_ip_or_legacy( $order );
+		if ( $allow_ip && WCAF_Helpers::is_ip_allowed( $allow_ip, $opts ) ) {
 			return [];
 		}
 

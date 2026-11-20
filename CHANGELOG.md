@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-20
+
+### Fixed
+- **A bot could choose the IP address its orders were judged and reported by.** Post-payment rules read WooCommerce's stored customer IP, which WooCommerce takes from the `X-Real-IP` or `X-Forwarded-For` header of whoever sends one. A bot could put an innocent address there and have it counted by the decline limit, linked to fraud, or reported to AbuseIPDB. The plugin now records the address its own trusted-proxy resolver derived from the customer's request (order meta `_wcaf_client_ip`, set when a checkout or Store API order is created and again at checkout), the same address the pre-payment checks use, and every rule that counts against an address uses only that: blacklisted IP, IP repeat, IP link, the decline counter, and AbuseIPDB. Orders placed before 1.13.0 carry no recorded address and are not judged or reported by IP; the allowlist exemption and the IP shown to the merchant fall back to WooCommerce's value for them. Alert emails show both addresses when they differ. Verified end to end with a Store API checkout carrying a forged `X-Real-IP`.
+- **Headless checkouts with a valid Cart-Token were refused by REST hardening.** WooCommerce accepts a valid Store API `Cart-Token` in place of the nonce, and the token is signed by the store and handed out by `GET /wc/store/v1/cart` exactly like the nonce. A Store API request with a valid token now passes; a tampered token, a token on `/wc/v3/orders`, and a banned IP are still refused.
+- **Only the first failed Stripe payment on an order was recorded.** A later attempt on the same order, such as a Radar block after an ordinary decline, was ignored. Each attempt is now recorded once, keyed by its charge (order meta `_wcaf_stripe_decline_attempts`), the panel shows the latest one, and a later fraud signal marks the order. Orders recorded before 1.13.0 keep their stored attempt and are not recorded twice.
+- **Shop managers could open the settings but not save them.** The form now saves with `manage_woocommerce`, the capability the menu already required.
+- **A failed telemetry deletion could not be retried.** Reports still stop at once, but the install ID is kept as deletion-pending (option `wcaf_telemetry_delete_pending`) and the request is retried by the daily run and from a "Retry the deletion" link under Privacy until the receiver confirms.
+
+Tests in section 8d of `wcaf-test.php`, on the posts store and under HPOS. All test scripts now block `wp_mail`.
+
 ## [1.12.4] - 2026-11-20
 
 ### Fixed

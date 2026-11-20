@@ -24,6 +24,13 @@ class WCAF_Telemetry {
 	const PLUGIN_SLUG   = 'wc-antifraud';
 	const STATUS_OPTION = 'wcaf_telemetry_status';
 
+	/**
+	 * Install ID whose deletion the receiver has not confirmed yet (1.13.0).
+	 * Reports stop at once; the deletion request is retried by the daily cron
+	 * and from the Privacy screen until the receiver answers 200.
+	 */
+	const DELETE_PENDING_OPTION = 'wcaf_telemetry_delete_pending';
+
 	public static function init() {
 		add_action( self::CRON_HOOK, [ __CLASS__, 'send' ] );
 		if ( is_admin() ) {
@@ -152,6 +159,11 @@ class WCAF_Telemetry {
 	 * @return bool|null Null when consent is absent, else success.
 	 */
 	public static function send() {
+		// A deletion the receiver has not confirmed is retried first, with or
+		// without consent (this cron event stays scheduled either way).
+		if ( '' !== self::pending_deletion() ) {
+			self::retry_pending_deletion();
+		}
 		if ( ! self::enabled() ) {
 			return null;
 		}
@@ -190,21 +202,62 @@ class WCAF_Telemetry {
 	 */
 	public static function delete_remote() {
 		$id = self::install_id();
-		$ok = false;
-		if ( '' !== $id ) {
-			$response = wp_remote_post( self::endpoint(), [
-				'timeout' => 10,
-				'headers' => [
-					'Content-Type' => 'application/json',
-					'User-Agent'   => WCAF_Helpers::outbound_user_agent(),
-				],
-				'body'    => wp_json_encode( [ 'install_id' => $id, 'plugin' => self::PLUGIN_SLUG, 'delete' => true ] ),
-			] );
-			$ok = ! is_wp_error( $response ) && 200 === (int) wp_remote_retrieve_response_code( $response );
+		if ( '' === $id ) {
+			$id = self::pending_deletion();
 		}
+		$ok = '' === $id || self::request_deletion( $id );
+		// Reports stop now whatever the receiver answered.
 		self::set_consent( false );
 		delete_option( self::STATUS_OPTION );
+		if ( $ok ) {
+			delete_option( self::DELETE_PENDING_OPTION );
+		} else {
+			update_option( self::DELETE_PENDING_OPTION, $id, false );
+		}
 		return $ok;
+	}
+
+	/**
+	 * Retry an unconfirmed deletion without touching consent (cron).
+	 *
+	 * @return bool Whether the receiver confirmed it.
+	 */
+	public static function retry_pending_deletion() {
+		$id = self::pending_deletion();
+		if ( '' === $id ) {
+			return true;
+		}
+		if ( ! self::request_deletion( $id ) ) {
+			return false;
+		}
+		delete_option( self::DELETE_PENDING_OPTION );
+		return true;
+	}
+
+	/**
+	 * @return string The install ID awaiting a confirmed deletion, or ''.
+	 */
+	public static function pending_deletion() {
+		$id = (string) get_option( self::DELETE_PENDING_OPTION, '' );
+		return preg_match( '/^[a-f0-9]{32}$/', $id ) ? $id : '';
+	}
+
+	/**
+	 * Ask the receiver to forget an install ID.
+	 *
+	 * @param string $id
+	 * @return bool Whether the receiver answered 200.
+	 */
+	private static function request_deletion( $id ) {
+		$response = wp_remote_post( self::endpoint(), [
+			'timeout' => 10,
+			'headers' => [
+				'Content-Type' => 'application/json',
+				'User-Agent'   => WCAF_Helpers::outbound_user_agent(),
+			],
+			'body'    => wp_json_encode( [ 'install_id' => $id, 'plugin' => self::PLUGIN_SLUG, 'delete' => true ] ),
+		] );
+		return ! is_wp_error( $response ) && 200 === (int) wp_remote_retrieve_response_code( $response );
 	}
 
 	/**

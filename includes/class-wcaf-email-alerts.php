@@ -48,7 +48,14 @@ class WCAF_Email_Alerts {
 		$body[] = sprintf( 'Name: %s %s', $order->get_billing_first_name(), $order->get_billing_last_name() );
 		$body[] = sprintf( 'Email: %s', $order->get_billing_email() );
 		$body[] = sprintf( 'Phone: %s', $order->get_billing_phone() );
-		$body[] = sprintf( 'IP: %s', $order->get_customer_ip_address() ?: '-' );
+		$ip_line = WCAF_Fraud_Checks::order_ip_or_legacy( $order ) ?: '-';
+		$wc_ip   = (string) $order->get_customer_ip_address();
+		if ( WCAF_Fraud_Checks::order_ip( $order ) && '' !== $wc_ip && $wc_ip !== $ip_line ) {
+			// The client sent forwarding headers naming another address.
+			/* translators: %s: IP address WooCommerce recorded from the request headers */
+			$ip_line .= ' ' . sprintf( __( '(WooCommerce recorded %s from the request headers)', 'wc-antifraud' ), $wc_ip );
+		}
+		$body[] = sprintf( 'IP: %s', $ip_line );
 		$body[] = '';
 		$body[] = __( 'FRAUD INDICATORS:', 'wc-antifraud' );
 		$body[] = implode( ', ', $reasons );

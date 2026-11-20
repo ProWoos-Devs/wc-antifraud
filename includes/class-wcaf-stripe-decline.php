@@ -36,6 +36,18 @@ class WCAF_Stripe_Decline {
 	const DECLINE_META = '_wcaf_stripe_decline';
 
 	/**
+	 * Order meta holding the payment attempts already recorded (JSON list of
+	 * keys: the charge ID, or the intent and error codes when no charge is
+	 * known). One order can see several attempts (WooCommerce retries a failed
+	 * order with the same order), and a later attempt may be the Radar block
+	 * (1.13.0; before, only the first failure per order was recorded).
+	 */
+	const ATTEMPTS_META = '_wcaf_stripe_decline_attempts';
+
+	/** Most attempt keys kept per order. */
+	const MAX_ATTEMPTS = 50;
+
+	/**
 	 * Issuer decline codes that are explicit fraud signals.
 	 * https://docs.stripe.com/declines/codes
 	 */
@@ -75,8 +87,11 @@ class WCAF_Stripe_Decline {
 			return;
 		}
 
-		// Both webhook types can arrive for one failed payment — record once.
-		if ( $order->get_meta( self::DECLINE_META ) ) {
+		// Both webhook types arrive for one failed payment, and both name the
+		// same charge: record each payment attempt once, every attempt.
+		$key  = self::attempt_key( $notification->type, $notification->data->object );
+		$seen = self::recorded_attempts( $order );
+		if ( in_array( $key, $seen, true ) ) {
 			return;
 		}
 
@@ -88,11 +103,77 @@ class WCAF_Stripe_Decline {
 			return;
 		}
 
+		$seen[] = $key;
+		$order->update_meta_data( self::ATTEMPTS_META, wp_json_encode( array_slice( $seen, -self::MAX_ATTEMPTS ) ) );
+		// The panel on the order screen shows the latest attempt.
 		$order->update_meta_data( self::DECLINE_META, wp_json_encode( $detail ) );
 		$order->save();
 		$order->add_order_note( self::build_note( $detail ) );
 
 		self::maybe_mark_fraud( $order, $detail );
+	}
+
+	/**
+	 * Key identifying one payment attempt, the same for the
+	 * payment_intent.payment_failed and charge.failed events of that attempt.
+	 *
+	 * @param string $type   Webhook event type.
+	 * @param object $object Event object (charge or payment intent).
+	 * @return string
+	 */
+	private static function attempt_key( $type, $object ) {
+		if ( 'charge.failed' === $type ) {
+			$charge = (string) ( $object->id ?? '' );
+			if ( '' !== $charge ) {
+				return $charge;
+			}
+			$intent = is_string( $object->payment_intent ?? null ) ? $object->payment_intent : '';
+			return self::intent_key( $intent, (string) ( $object->failure_code ?? '' ), '' );
+		}
+		$lpe    = isset( $object->last_payment_error ) && is_object( $object->last_payment_error ) ? $object->last_payment_error : null;
+		$charge = '';
+		if ( ! empty( $object->latest_charge ) ) {
+			$charge = is_object( $object->latest_charge ) ? (string) ( $object->latest_charge->id ?? '' ) : (string) $object->latest_charge;
+		} elseif ( ! empty( $lpe->charge ) ) {
+			$charge = (string) $lpe->charge;
+		}
+		if ( '' !== $charge ) {
+			return $charge;
+		}
+		return self::intent_key( (string) ( $object->id ?? '' ), (string) ( $lpe->code ?? '' ), (string) ( $lpe->decline_code ?? '' ) );
+	}
+
+	/**
+	 * @param string $intent
+	 * @param string $code
+	 * @param string $decline_code
+	 * @return string
+	 */
+	private static function intent_key( $intent, $code, $decline_code ) {
+		return 'pi:' . $intent . ':' . $code . ':' . $decline_code;
+	}
+
+	/**
+	 * Attempt keys already recorded on the order. An order recorded before
+	 * 1.13.0 has the decline detail but no list; its one attempt is derived
+	 * from the stored detail so the same webhook is not recorded twice.
+	 *
+	 * @param WC_Order $order
+	 * @return string[]
+	 */
+	private static function recorded_attempts( $order ) {
+		$list = json_decode( (string) $order->get_meta( self::ATTEMPTS_META ), true );
+		if ( is_array( $list ) ) {
+			return array_values( array_filter( $list, 'is_string' ) );
+		}
+		$detail = json_decode( (string) $order->get_meta( self::DECLINE_META ), true );
+		if ( ! is_array( $detail ) ) {
+			return [];
+		}
+		if ( ! empty( $detail['charge'] ) ) {
+			return [ (string) $detail['charge'] ];
+		}
+		return [ self::intent_key( (string) ( $detail['payment_intent'] ?? '' ), (string) ( $detail['code'] ?? '' ), (string) ( $detail['decline_code'] ?? '' ) ) ];
 	}
 
 	/**

@@ -244,7 +244,9 @@ class WCAF_Order_Status {
 			$added[]                = $email;
 		}
 
-		$ip = (string) $order->get_customer_ip_address();
+		// The merchant's own decision on an order they are looking at, so an
+		// order placed before 1.13.0 may use WooCommerce's stored IP.
+		$ip = (string) WCAF_Fraud_Checks::order_ip_or_legacy( $order );
 		if ( $ip
 			&& false !== filter_var( $ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE )
 			&& ! WCAF_Helpers::is_ip_blocked( $ip, $opts )
@@ -467,7 +469,7 @@ class WCAF_Order_Status {
 	 * @param string $until_gmt  MySQL datetime (GMT); only orders created at or before it. '' = no upper bound.
 	 *                           The linked-fraud rule passes the analyzed order's own time, so a fraud
 	 *                           order placed later can never reach back and cancel an earlier sale.
-	 * @return array[] Rows: id, created_gmt, email, ip, ship_address_1, ship_postcode, bill_address_1, bill_postcode, status, source.
+	 * @return array[] Rows: id, created_gmt, email, ip (the plugin-resolved address, empty before 1.13.0), ship_address_1, ship_postcode, bill_address_1, bill_postcode, status, source.
 	 */
 	public static function recent_fraud_anchors( $since_gmt, $exclude_id = 0, $limit = 500, $until_gmt = '' ) {
 		global $wpdb;
@@ -483,13 +485,14 @@ class WCAF_Order_Status {
 			$meta   = $wpdb->prefix . 'wc_orders_meta';
 			$sql    = $wpdb->prepare(
 				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names and placeholders built above.
-				"SELECT o.id AS id, o.status AS status, o.date_created_gmt AS created_gmt, o.billing_email AS email, o.ip_address AS ip,
+				"SELECT o.id AS id, o.status AS status, o.date_created_gmt AS created_gmt, o.billing_email AS email, cip.meta_value AS ip,
 					s.address_1 AS ship_address_1, s.postcode AS ship_postcode,
 					b.address_1 AS bill_address_1, b.postcode AS bill_postcode, fs.meta_value AS source
 				FROM {$orders} o
 				LEFT JOIN {$addr} s ON s.order_id = o.id AND s.address_type = 'shipping'
 				LEFT JOIN {$addr} b ON b.order_id = o.id AND b.address_type = 'billing'
 				LEFT JOIN {$meta} fs ON fs.order_id = o.id AND fs.meta_key = %s
+				LEFT JOIN {$meta} cip ON cip.order_id = o.id AND cip.meta_key = %s
 				WHERE o.type = 'shop_order'
 					AND o.status <> 'trash'
 					AND o.date_created_gmt >= %s
@@ -500,7 +503,7 @@ class WCAF_Order_Status {
 				ORDER BY o.id DESC
 				LIMIT %d",
 				// phpcs:enable
-				array_merge( [ self::FRAUD_SOURCE_META, $since_gmt, $until_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
+				array_merge( [ self::FRAUD_SOURCE_META, WCAF_Fraud_Checks::CLIENT_IP_META, $since_gmt, $until_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
 			);
 		} else {
 			$sql = $wpdb->prepare(
@@ -511,7 +514,7 @@ class WCAF_Order_Status {
 					ba.meta_value AS bill_address_1, bp.meta_value AS bill_postcode, fs.meta_value AS source
 				FROM {$wpdb->posts} p
 				LEFT JOIN {$wpdb->postmeta} em ON em.post_id = p.ID AND em.meta_key = '_billing_email'
-				LEFT JOIN {$wpdb->postmeta} ip ON ip.post_id = p.ID AND ip.meta_key = '_customer_ip_address'
+				LEFT JOIN {$wpdb->postmeta} ip ON ip.post_id = p.ID AND ip.meta_key = %s
 				LEFT JOIN {$wpdb->postmeta} sa ON sa.post_id = p.ID AND sa.meta_key = '_shipping_address_1'
 				LEFT JOIN {$wpdb->postmeta} sp ON sp.post_id = p.ID AND sp.meta_key = '_shipping_postcode'
 				LEFT JOIN {$wpdb->postmeta} ba ON ba.post_id = p.ID AND ba.meta_key = '_billing_address_1'
@@ -527,7 +530,7 @@ class WCAF_Order_Status {
 				ORDER BY p.ID DESC
 				LIMIT %d",
 				// phpcs:enable
-				array_merge( [ self::FRAUD_SOURCE_META, $since_gmt, $until_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
+				array_merge( [ WCAF_Fraud_Checks::CLIENT_IP_META, self::FRAUD_SOURCE_META, $since_gmt, $until_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
 			);
 		}
 
