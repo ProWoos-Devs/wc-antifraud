@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-11-20
+
+### Fixed
+- **Different streets in Indic, Thai or Arabic script could match as the same ship-to address.** The address key kept letters and digits but stripped combining marks, which carry the vowels in those scripts, so गांधी मार्ग and गंधी मार्ग, or कमल नगर and कमला नगर, reduced to the same key, and a paid order sharing only the postcode with a fraud order elsewhere could be cancelled. Combining marks are now kept, and the text is NFC-normalized first so the same street typed in composed or decomposed form still matches.
+- **Two flats on the same street matched as the same address.** Only address line 1 and the postcode were compared, so where the house or flat number sits in line 2 (common in Russia and Eastern Europe), neighbors matched. Line 2 is now part of the key, in the anchor query too, on both stores.
+
+Tests in section 8c2 of `wcaf-test.php`, on the posts store and under HPOS.
+
 ## [1.13.0] - 2026-11-20
 
 ### Fixed

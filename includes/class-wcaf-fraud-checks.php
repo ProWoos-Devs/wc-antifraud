@@ -609,7 +609,10 @@ class WCAF_Fraud_Checks {
 		}
 
 		$email   = self::normalize_email( $order->get_billing_email() );
-		$address = self::ship_to_key( $order->get_shipping_address_1(), $order->get_shipping_postcode(), $order->get_billing_address_1(), $order->get_billing_postcode() );
+		$address = self::ship_to_key(
+			[ $order->get_shipping_address_1(), $order->get_shipping_address_2(), $order->get_shipping_postcode() ],
+			[ $order->get_billing_address_1(), $order->get_billing_address_2(), $order->get_billing_postcode() ]
+		);
 		$ip      = self::order_ip( $order );
 		$use_ip  = $ip && WCAF_Helpers::is_public_ip( $ip ) && ! WCAF_Client_IP::ip_rules_suspended();
 
@@ -627,7 +630,10 @@ class WCAF_Fraud_Checks {
 
 			if ( '' !== $email && $email === self::normalize_email( $row['email'] ) ) {
 				$match = __( 'same email address', 'wc-antifraud' );
-			} elseif ( '' !== $address && $address === self::ship_to_key( $row['ship_address_1'], $row['ship_postcode'], $row['bill_address_1'], $row['bill_postcode'] ) ) {
+			} elseif ( '' !== $address && $address === self::ship_to_key(
+				[ $row['ship_address_1'], $row['ship_address_2'] ?? '', $row['ship_postcode'] ],
+				[ $row['bill_address_1'], $row['bill_address_2'] ?? '', $row['bill_postcode'] ]
+			) ) {
 				$match = __( 'same ship-to address', 'wc-antifraud' );
 			} elseif ( $use_ip && $ip === (string) $row['ip'] ) {
 				$anchor_ts = strtotime( (string) $row['created_gmt'] . ' UTC' );
@@ -663,39 +669,45 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
-	 * Comparable ship-to key: street line plus postcode, accents folded,
-	 * lowercased, letters and digits only (any script), so "4250 Pittman Grove
-	 * Church Rd." and "4250 pittman grove church rd" compare equal, and two
-	 * different Cyrillic or Greek streets stay different. Falls back to the
-	 * billing address when the order has no shipping street. Empty when the
-	 * street on its own, or street and postcode together, are too short to mean
-	 * anything (before 1.12.4 a non-Latin street was stripped to nothing and the
-	 * postcode alone matched).
+	 * Comparable ship-to key: both street lines plus postcode, accents folded,
+	 * lowercased, letters, combining marks and digits only (any script), so
+	 * "4250 Pittman Grove Church Rd." and "4250 pittman grove church rd" compare
+	 * equal, while two different Cyrillic, Devanagari or Thai streets stay
+	 * different, and two flats on one street (house or flat number in line 2)
+	 * stay different. Falls back to the billing address when the order has no
+	 * shipping street. Empty when the first street line on its own, or that line
+	 * and the postcode together, are too short to mean anything.
 	 *
-	 * @param string|null $ship_address_1
-	 * @param string|null $ship_postcode
-	 * @param string|null $bill_address_1
-	 * @param string|null $bill_postcode
+	 * History: before 1.12.4 a non-Latin street was stripped to nothing and the
+	 * postcode alone matched; before 1.13.1 the vowel signs of Indic, Thai and
+	 * Arabic script were stripped (so गांधी मार्ग matched गंधी मार्ग) and line 2
+	 * was ignored.
+	 *
+	 * @param array $ship [ address_1, address_2, postcode ]
+	 * @param array $bill [ address_1, address_2, postcode ]
 	 * @return string
 	 */
-	private static function ship_to_key( $ship_address_1, $ship_postcode, $bill_address_1, $bill_postcode ) {
-		$street   = trim( (string) $ship_address_1 );
-		$postcode = (string) $ship_postcode;
-		if ( '' === $street ) {
-			$street   = trim( (string) $bill_address_1 );
-			$postcode = (string) $bill_postcode;
-		}
-		$street = self::address_token( $street );
+	private static function ship_to_key( array $ship, array $bill ) {
+		$parts = '' !== trim( (string) ( $ship[0] ?? '' ) ) ? $ship : $bill;
+
+		$street = self::address_token( $parts[0] ?? '' );
 		if ( self::token_length( $street ) < self::LINKED_STREET_MIN_LENGTH ) {
 			return '';
 		}
-		$key = $street . '|' . self::address_token( $postcode );
-		return self::token_length( $key ) - 1 >= self::LINKED_ADDRESS_MIN_LENGTH ? $key : '';
+		$line2    = self::address_token( $parts[1] ?? '' );
+		$postcode = self::address_token( $parts[2] ?? '' );
+		if ( self::token_length( $street . $postcode ) < self::LINKED_ADDRESS_MIN_LENGTH ) {
+			return '';
+		}
+		return $street . '|' . $line2 . '|' . $postcode;
 	}
 
 	/**
-	 * An address part reduced to lowercase letters and digits of any script,
-	 * with Latin accents folded (Müller and Muller compare equal). The locale is
+	 * An address part reduced to lowercase letters, combining marks and digits
+	 * of any script, with Latin accents folded (Müller and Muller compare
+	 * equal). Combining marks are kept because in Indic, Thai and Arabic script
+	 * they are the vowels. The text is NFC-normalized first so the same street
+	 * typed in composed or decomposed form gives the same key. The locale is
 	 * fixed so the key is the same whatever locale the current request runs in
 	 * (a multilingual plugin can change it per request).
 	 *
@@ -703,8 +715,15 @@ class WCAF_Fraud_Checks {
 	 * @return string
 	 */
 	private static function address_token( $value ) {
-		$value = remove_accents( (string) $value, 'en_US' );
-		$value = preg_replace( '/[^\p{L}\p{N}]+/u', '', $value );
+		$value = (string) $value;
+		if ( function_exists( 'normalizer_normalize' ) ) {
+			$normalized = normalizer_normalize( $value, Normalizer::FORM_C );
+			if ( is_string( $normalized ) ) {
+				$value = $normalized;
+			}
+		}
+		$value = remove_accents( $value, 'en_US' );
+		$value = preg_replace( '/[^\p{L}\p{M}\p{N}]+/u', '', $value );
 		if ( ! is_string( $value ) ) {
 			return ''; // Invalid UTF-8.
 		}

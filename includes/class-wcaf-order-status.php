@@ -469,7 +469,7 @@ class WCAF_Order_Status {
 	 * @param string $until_gmt  MySQL datetime (GMT); only orders created at or before it. '' = no upper bound.
 	 *                           The linked-fraud rule passes the analyzed order's own time, so a fraud
 	 *                           order placed later can never reach back and cancel an earlier sale.
-	 * @return array[] Rows: id, created_gmt, email, ip (the plugin-resolved address, empty before 1.13.0), ship_address_1, ship_postcode, bill_address_1, bill_postcode, status, source.
+	 * @return array[] Rows: id, created_gmt, email, ip (the plugin-resolved address, empty before 1.13.0), ship_address_1, ship_address_2, ship_postcode, bill_address_1, bill_address_2, bill_postcode, status, source.
 	 */
 	public static function recent_fraud_anchors( $since_gmt, $exclude_id = 0, $limit = 500, $until_gmt = '' ) {
 		global $wpdb;
@@ -486,8 +486,8 @@ class WCAF_Order_Status {
 			$sql    = $wpdb->prepare(
 				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names and placeholders built above.
 				"SELECT o.id AS id, o.status AS status, o.date_created_gmt AS created_gmt, o.billing_email AS email, cip.meta_value AS ip,
-					s.address_1 AS ship_address_1, s.postcode AS ship_postcode,
-					b.address_1 AS bill_address_1, b.postcode AS bill_postcode, fs.meta_value AS source
+					s.address_1 AS ship_address_1, s.address_2 AS ship_address_2, s.postcode AS ship_postcode,
+					b.address_1 AS bill_address_1, b.address_2 AS bill_address_2, b.postcode AS bill_postcode, fs.meta_value AS source
 				FROM {$orders} o
 				LEFT JOIN {$addr} s ON s.order_id = o.id AND s.address_type = 'shipping'
 				LEFT JOIN {$addr} b ON b.order_id = o.id AND b.address_type = 'billing'
@@ -510,14 +510,16 @@ class WCAF_Order_Status {
 				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- placeholders built above.
 				"SELECT p.ID AS id, p.post_status AS status, p.post_date_gmt AS created_gmt,
 					em.meta_value AS email, ip.meta_value AS ip,
-					sa.meta_value AS ship_address_1, sp.meta_value AS ship_postcode,
-					ba.meta_value AS bill_address_1, bp.meta_value AS bill_postcode, fs.meta_value AS source
+					sa.meta_value AS ship_address_1, sa2.meta_value AS ship_address_2, sp.meta_value AS ship_postcode,
+					ba.meta_value AS bill_address_1, ba2.meta_value AS bill_address_2, bp.meta_value AS bill_postcode, fs.meta_value AS source
 				FROM {$wpdb->posts} p
 				LEFT JOIN {$wpdb->postmeta} em ON em.post_id = p.ID AND em.meta_key = '_billing_email'
 				LEFT JOIN {$wpdb->postmeta} ip ON ip.post_id = p.ID AND ip.meta_key = %s
 				LEFT JOIN {$wpdb->postmeta} sa ON sa.post_id = p.ID AND sa.meta_key = '_shipping_address_1'
+				LEFT JOIN {$wpdb->postmeta} sa2 ON sa2.post_id = p.ID AND sa2.meta_key = '_shipping_address_2'
 				LEFT JOIN {$wpdb->postmeta} sp ON sp.post_id = p.ID AND sp.meta_key = '_shipping_postcode'
 				LEFT JOIN {$wpdb->postmeta} ba ON ba.post_id = p.ID AND ba.meta_key = '_billing_address_1'
+				LEFT JOIN {$wpdb->postmeta} ba2 ON ba2.post_id = p.ID AND ba2.meta_key = '_billing_address_2'
 				LEFT JOIN {$wpdb->postmeta} bp ON bp.post_id = p.ID AND bp.meta_key = '_billing_postcode'
 				LEFT JOIN {$wpdb->postmeta} fs ON fs.post_id = p.ID AND fs.meta_key = %s
 				WHERE p.post_type = 'shop_order'
