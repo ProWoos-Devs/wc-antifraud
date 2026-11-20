@@ -82,6 +82,15 @@ class WCAF_Order_Status {
 	const RELEASED_META = '_wcaf_released';
 
 	/**
+	 * Who issued the fraud verdict: `stripe` (a gateway verdict, or an order
+	 * linked only to one) or `plugin` (the plugin's own detection or a manual
+	 * mark). Kept apart from the status because a refund replaces the status
+	 * while the fraud flag stays, and the linked-fraud rule must still know
+	 * that a refunded order carried a Stripe verdict (1.12.4).
+	 */
+	const FRAUD_SOURCE_META = '_wcaf_fraud_source';
+
+	/**
 	 * Key of the "Block this customer" entry in the order-screen Actions dropdown.
 	 */
 	const BLOCK_ACTION = 'wcaf_block_customer';
@@ -132,7 +141,14 @@ class WCAF_Order_Status {
 			return;
 		}
 		// A refund keeps the fraud designation (persistent flag); it is not an un-mark.
+		// The status no longer says who issued the verdict, so record it on an
+		// order marked before 1.12.4 that does not carry the source yet.
 		if ( 'refunded' === $to ) {
+			$order = wc_get_order( $order_id );
+			if ( $order && '' === (string) $order->get_meta( self::FRAUD_SOURCE_META ) ) {
+				$order->update_meta_data( self::FRAUD_SOURCE_META, self::STRIPE_STATUS_SLUG === $from ? 'stripe' : 'plugin' );
+				$order->save_meta_data();
+			}
 			return;
 		}
 
@@ -448,14 +464,18 @@ class WCAF_Order_Status {
 	 * @param string $since_gmt  MySQL datetime (GMT); only orders created at or after it.
 	 * @param int    $exclude_id Order to leave out (the one being analyzed).
 	 * @param int    $limit      Row cap, newest first.
-	 * @return array[] Rows: id, created_gmt, email, ip, ship_address_1, ship_postcode, bill_address_1, bill_postcode, status.
+	 * @param string $until_gmt  MySQL datetime (GMT); only orders created at or before it. '' = no upper bound.
+	 *                           The linked-fraud rule passes the analyzed order's own time, so a fraud
+	 *                           order placed later can never reach back and cancel an earlier sale.
+	 * @return array[] Rows: id, created_gmt, email, ip, ship_address_1, ship_postcode, bill_address_1, bill_postcode, status, source.
 	 */
-	public static function recent_fraud_anchors( $since_gmt, $exclude_id = 0, $limit = 500 ) {
+	public static function recent_fraud_anchors( $since_gmt, $exclude_id = 0, $limit = 500, $until_gmt = '' ) {
 		global $wpdb;
 
 		$statuses     = self::database_statuses();
 		$placeholders = implode( ', ', array_fill( 0, count( $statuses ), '%s' ) );
 		$limit        = max( 1, (int) $limit );
+		$until_gmt    = '' !== (string) $until_gmt ? (string) $until_gmt : '9999-12-31 23:59:59';
 
 		if ( self::hpos_enabled() ) {
 			$orders = $wpdb->prefix . 'wc_orders';
@@ -465,20 +485,22 @@ class WCAF_Order_Status {
 				// phpcs:disable WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table names and placeholders built above.
 				"SELECT o.id AS id, o.status AS status, o.date_created_gmt AS created_gmt, o.billing_email AS email, o.ip_address AS ip,
 					s.address_1 AS ship_address_1, s.postcode AS ship_postcode,
-					b.address_1 AS bill_address_1, b.postcode AS bill_postcode
+					b.address_1 AS bill_address_1, b.postcode AS bill_postcode, fs.meta_value AS source
 				FROM {$orders} o
 				LEFT JOIN {$addr} s ON s.order_id = o.id AND s.address_type = 'shipping'
 				LEFT JOIN {$addr} b ON b.order_id = o.id AND b.address_type = 'billing'
+				LEFT JOIN {$meta} fs ON fs.order_id = o.id AND fs.meta_key = %s
 				WHERE o.type = 'shop_order'
 					AND o.status <> 'trash'
 					AND o.date_created_gmt >= %s
+					AND o.date_created_gmt <= %s
 					AND o.id <> %d
 					AND ( o.status IN ( {$placeholders} )
 						OR EXISTS ( SELECT 1 FROM {$meta} m WHERE m.order_id = o.id AND m.meta_key = %s AND m.meta_value IN ( 'yes', '1' ) ) )
 				ORDER BY o.id DESC
 				LIMIT %d",
 				// phpcs:enable
-				array_merge( [ $since_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
+				array_merge( [ self::FRAUD_SOURCE_META, $since_gmt, $until_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
 			);
 		} else {
 			$sql = $wpdb->prepare(
@@ -486,7 +508,7 @@ class WCAF_Order_Status {
 				"SELECT p.ID AS id, p.post_status AS status, p.post_date_gmt AS created_gmt,
 					em.meta_value AS email, ip.meta_value AS ip,
 					sa.meta_value AS ship_address_1, sp.meta_value AS ship_postcode,
-					ba.meta_value AS bill_address_1, bp.meta_value AS bill_postcode
+					ba.meta_value AS bill_address_1, bp.meta_value AS bill_postcode, fs.meta_value AS source
 				FROM {$wpdb->posts} p
 				LEFT JOIN {$wpdb->postmeta} em ON em.post_id = p.ID AND em.meta_key = '_billing_email'
 				LEFT JOIN {$wpdb->postmeta} ip ON ip.post_id = p.ID AND ip.meta_key = '_customer_ip_address'
@@ -494,16 +516,18 @@ class WCAF_Order_Status {
 				LEFT JOIN {$wpdb->postmeta} sp ON sp.post_id = p.ID AND sp.meta_key = '_shipping_postcode'
 				LEFT JOIN {$wpdb->postmeta} ba ON ba.post_id = p.ID AND ba.meta_key = '_billing_address_1'
 				LEFT JOIN {$wpdb->postmeta} bp ON bp.post_id = p.ID AND bp.meta_key = '_billing_postcode'
+				LEFT JOIN {$wpdb->postmeta} fs ON fs.post_id = p.ID AND fs.meta_key = %s
 				WHERE p.post_type = 'shop_order'
 					AND p.post_status <> 'trash'
 					AND p.post_date_gmt >= %s
+					AND p.post_date_gmt <= %s
 					AND p.ID <> %d
 					AND ( p.post_status IN ( {$placeholders} )
 						OR EXISTS ( SELECT 1 FROM {$wpdb->postmeta} f WHERE f.post_id = p.ID AND f.meta_key = %s AND f.meta_value IN ( 'yes', '1' ) ) )
 				ORDER BY p.ID DESC
 				LIMIT %d",
 				// phpcs:enable
-				array_merge( [ $since_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
+				array_merge( [ self::FRAUD_SOURCE_META, $since_gmt, $until_gmt, (int) $exclude_id ], $statuses, [ self::FRAUD_FLAG_META, $limit ] )
 			);
 		}
 
@@ -931,6 +955,7 @@ class WCAF_Order_Status {
 		// relabel the order as Refunded and hide the fraud designation.
 		// update_status() calls save(), which persists this pending meta.
 		$order->update_meta_data( self::FRAUD_FLAG_META, 'yes' );
+		$order->update_meta_data( self::FRAUD_SOURCE_META, self::STRIPE_STATUS_SLUG === $status ? 'stripe' : 'plugin' );
 		$order->update_status( $status, $note );
 		WCAF_Stats::bump( 'marked:' . $status );
 

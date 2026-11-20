@@ -22,6 +22,19 @@ class WCAF_Fraud_Checks {
 	/** Shortest normalized ship-to key (street + postcode) worth comparing. */
 	const LINKED_ADDRESS_MIN_LENGTH = 6;
 
+	/**
+	 * Shortest normalized street line, on its own, worth comparing. A shared
+	 * postcode alone is a neighbourhood, not a drop address.
+	 */
+	const LINKED_STREET_MIN_LENGTH = 4;
+
+	/**
+	 * Order meta set at checkout when the customer's own request carried proxy
+	 * headers. The post-payment analysis often runs in a webhook or an admin
+	 * request, whose headers say nothing about the customer (1.12.4).
+	 */
+	const PROXY_SEEN_META = '_wcaf_proxy_seen';
+
 	/** WC session key set when the checkout page is rendered for that session. */
 	const CHECKOUT_SEEN_SESSION_KEY = 'wcaf_checkout_seen';
 
@@ -58,6 +71,11 @@ class WCAF_Fraud_Checks {
 		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ $this, 'stamp_checkout_seen' ], 10, 2 );
 		add_action( 'woocommerce_checkout_create_order', [ $this, 'stamp_checkout_seen' ], 10, 2 );
 
+		// Proxy headers are read from the customer's checkout request and kept on
+		// the order, because the paid/failed transitions usually run elsewhere.
+		add_action( 'woocommerce_store_api_checkout_update_order_from_request', [ $this, 'stamp_proxy_signal' ], 10, 2 );
+		add_action( 'woocommerce_checkout_create_order', [ $this, 'stamp_proxy_signal' ], 10, 2 );
+
 		add_action( 'woocommerce_thankyou', [ $this, 'analyze_order_after_payment' ], 10, 1 );
 
 		// Server-side post-payment analysis. Carding bots check out via the Store
@@ -82,6 +100,11 @@ class WCAF_Fraud_Checks {
 	 */
 	public function check_cart_total() {
 		if ( ! WC()->cart ) {
+			return;
+		}
+		// Allowlisted IPs bypass every rule, this one included.
+		$ip = WCAF_Helpers::get_client_ip();
+		if ( $ip && WCAF_Helpers::is_ip_allowed( $ip, $this->options ) ) {
 			return;
 		}
 		$totals     = WC()->cart->get_totals();
@@ -173,6 +196,19 @@ class WCAF_Fraud_Checks {
 		$seen = (int) WC()->session->get( self::CHECKOUT_SEEN_SESSION_KEY );
 		if ( $seen > 0 ) {
 			$order->update_meta_data( self::CHECKOUT_SEEN_META, $seen );
+		}
+	}
+
+	/**
+	 * Record on the order being created that the customer's checkout request
+	 * carried proxy headers (Store API and classic checkout).
+	 *
+	 * @param WC_Order              $order
+	 * @param WP_REST_Request|array $request Request or posted data (unused).
+	 */
+	public function stamp_proxy_signal( $order, $request = null ) {
+		if ( $order instanceof WC_Order && WCAF_Helpers::is_proxy_detected() ) {
+			$order->update_meta_data( self::PROXY_SEEN_META, 'yes' );
 		}
 	}
 
@@ -405,9 +441,11 @@ class WCAF_Fraud_Checks {
 			$reasons['blacklist_phone'] = __( 'Blacklisted Phone Number', 'wc-antifraud' );
 		}
 
-		// Proxy/VPN (request headers, so only meaningful when the customer's own
-		// request is the one running this analysis)
-		if ( ! empty( $opts['enable_proxy_check'] ) && WCAF_Helpers::is_proxy_detected() ) {
+		// Proxy/VPN: the signal captured from the customer's own checkout request,
+		// never the headers of the request running this analysis (a gateway
+		// webhook or an admin status change). Orders placed before 1.12.4 carry
+		// no marker and are not judged on it.
+		if ( ! empty( $opts['enable_proxy_check'] ) && 'yes' === $order->get_meta( self::PROXY_SEEN_META ) ) {
 			$reasons['proxy'] = __( 'Proxy/VPN Detected', 'wc-antifraud' );
 		}
 
@@ -458,11 +496,23 @@ class WCAF_Fraud_Checks {
 		}
 		$days = max( 1, (int) ( $this->options['linked_fraud_days'] ?? 30 ) );
 
+		// The order's own moment: when it was paid, else when it was created.
+		// Only fraud orders created up to that moment count, so an order that is
+		// analyzed again later (processing to completed, failed to cancelled)
+		// cannot be linked to fraud that happened after it.
+		$paid    = $order->get_date_paid();
 		$created = $order->get_date_created();
-		$now_ts  = $created ? $created->getTimestamp() : time();
-		$since   = gmdate( 'Y-m-d H:i:s', $now_ts - $days * DAY_IN_SECONDS );
+		if ( $paid ) {
+			$now_ts = $paid->getTimestamp();
+		} elseif ( $created ) {
+			$now_ts = $created->getTimestamp();
+		} else {
+			$now_ts = time();
+		}
+		$since = gmdate( 'Y-m-d H:i:s', $now_ts - $days * DAY_IN_SECONDS );
+		$until = gmdate( 'Y-m-d H:i:s', $now_ts );
 
-		$anchors = WCAF_Order_Status::recent_fraud_anchors( $since, $order->get_id(), self::LINKED_ANCHOR_LIMIT );
+		$anchors = WCAF_Order_Status::recent_fraud_anchors( $since, $order->get_id(), self::LINKED_ANCHOR_LIMIT, $until );
 		if ( empty( $anchors ) ) {
 			return [];
 		}
@@ -475,7 +525,10 @@ class WCAF_Fraud_Checks {
 		$stripe_status = [ WCAF_Order_Status::STRIPE_STATUS_SLUG, 'wc-' . WCAF_Order_Status::STRIPE_STATUS_SLUG ];
 
 		foreach ( $anchors as $row ) {
-			if ( ! $include_stripe_anchors && in_array( $row['status'], $stripe_status, true ) ) {
+			// A Stripe verdict by its status, or by the recorded source once a
+			// refund has replaced the status.
+			$is_stripe = in_array( $row['status'], $stripe_status, true ) || 'stripe' === ( $row['source'] ?? '' );
+			if ( ! $include_stripe_anchors && $is_stripe ) {
 				continue;
 			}
 			$anchor_id = (int) $row['id'];
@@ -493,7 +546,7 @@ class WCAF_Fraud_Checks {
 			}
 
 			if ( '' !== $match ) {
-				$slug = in_array( $row['status'], $stripe_status, true ) ? 'linked_gateway_fraud' : 'linked_fraud';
+				$slug = $is_stripe ? 'linked_gateway_fraud' : 'linked_fraud';
 				return [
 					$slug => sprintf(
 						/* translators: 1: order number of the earlier fraud order, 2: what the two orders share */
@@ -519,10 +572,14 @@ class WCAF_Fraud_Checks {
 	}
 
 	/**
-	 * Comparable ship-to key: street line plus postcode, lowercased, letters and
-	 * digits only, so "4250 Pittman Grove Church Rd." and "4250 pittman grove
-	 * church rd" compare equal. Falls back to the billing address when the order
-	 * has no shipping street. Empty when too short to mean anything.
+	 * Comparable ship-to key: street line plus postcode, accents folded,
+	 * lowercased, letters and digits only (any script), so "4250 Pittman Grove
+	 * Church Rd." and "4250 pittman grove church rd" compare equal, and two
+	 * different Cyrillic or Greek streets stay different. Falls back to the
+	 * billing address when the order has no shipping street. Empty when the
+	 * street on its own, or street and postcode together, are too short to mean
+	 * anything (before 1.12.4 a non-Latin street was stripped to nothing and the
+	 * postcode alone matched).
 	 *
 	 * @param string|null $ship_address_1
 	 * @param string|null $ship_postcode
@@ -537,11 +594,40 @@ class WCAF_Fraud_Checks {
 			$street   = trim( (string) $bill_address_1 );
 			$postcode = (string) $bill_postcode;
 		}
-		if ( '' === $street ) {
+		$street = self::address_token( $street );
+		if ( self::token_length( $street ) < self::LINKED_STREET_MIN_LENGTH ) {
 			return '';
 		}
-		$key = strtolower( preg_replace( '/[^a-z0-9]/i', '', $street . $postcode ) );
-		return strlen( $key ) >= self::LINKED_ADDRESS_MIN_LENGTH ? $key : '';
+		$key = $street . '|' . self::address_token( $postcode );
+		return self::token_length( $key ) - 1 >= self::LINKED_ADDRESS_MIN_LENGTH ? $key : '';
+	}
+
+	/**
+	 * An address part reduced to lowercase letters and digits of any script,
+	 * with Latin accents folded (Müller and Muller compare equal). The locale is
+	 * fixed so the key is the same whatever locale the current request runs in
+	 * (a multilingual plugin can change it per request).
+	 *
+	 * @param string $value
+	 * @return string
+	 */
+	private static function address_token( $value ) {
+		$value = remove_accents( (string) $value, 'en_US' );
+		$value = preg_replace( '/[^\p{L}\p{N}]+/u', '', $value );
+		if ( ! is_string( $value ) ) {
+			return ''; // Invalid UTF-8.
+		}
+		return function_exists( 'mb_strtolower' ) ? mb_strtolower( $value, 'UTF-8' ) : strtolower( $value );
+	}
+
+	/**
+	 * Character count of a UTF-8 string (WordPress ships an mb_strlen() fallback).
+	 *
+	 * @param string $value
+	 * @return int
+	 */
+	private static function token_length( $value ) {
+		return (int) mb_strlen( $value, 'UTF-8' );
 	}
 
 	/**

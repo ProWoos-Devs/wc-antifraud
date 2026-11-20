@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.4] - 2026-11-20
+
+### Fixed
+- **A refunded Stripe verdict could cancel the customer's paid retry.** The Linked to Known Fraud rule recognized a Stripe verdict only by its "Cancelled by Stripe" status, and a refund replaces the status while the fraud flag stays, so the refunded order then anchored paid orders like one of the plugin's own detections. Every fraud mark now records who issued the verdict (order meta `_wcaf_fraud_source`, `stripe` or `plugin`), and an order marked before 1.12.4 gets it at the moment it is refunded. Refunded plugin detections still anchor.
+- **A fraud order placed later could cancel an earlier paid order.** The anchor query bounded only the start of the look-back window, and a paid order is analyzed again when it moves to Completed, so it could be linked to fraud from weeks after it. Anchors now have to be created no later than the analyzed order was paid (or created, when unpaid).
+- **Two different non-Latin streets with the same postcode matched as the same ship-to address.** The address key kept only `a-z0-9`, so a Cyrillic, Greek or CJK street was stripped to nothing and the postcode alone matched. The key now keeps letters and digits of any script, folds Latin accents (Müller = Muller), and needs at least 4 characters of street on its own.
+- **The optional proxy rule judged the wrong request.** It read the proxy headers of whatever request ran the analysis, usually a gateway webhook or an admin status change. The signal is now captured from the customer's checkout request (order meta `_wcaf_proxy_seen`, classic and Block Checkout) and read from the order. Orders placed before 1.12.4 carry no marker and are not judged on it.
+- **The suspicious-amount cart rule ignored the IP allowlist.** Allowlisted addresses are now exempt, like every other rule.
+
+Tests in section 8c of `wcaf-test.php`, run on the posts store and under HPOS.
+
 ## [1.12.3] - 2026-10-28
 
 ### Fixed
